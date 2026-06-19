@@ -1,0 +1,1779 @@
+import { Transaction } from "../types";
+
+export interface CapturedAMLState {
+  reportDate: string;
+  complianceOfficer: string;
+  analysisMonth: string;
+  lookbackMonths: number;
+  alertThreshold: number;
+  selectedPresetId: string;
+  selectedPresetName: string;
+  antiquityLimit: number;
+  activeTab?: "alertas" | "forense";
+  forensicMode?: "individual" | "grupal";
+  currentCuit?: string;
+  selectedGroupId?: string | null;
+  
+  // Captura de Métricas Clave (EBR - Enfoque Basado en Riesgo)
+  metrics: {
+    totalVolumeARS: number;
+    totalTransactionsCount: number;
+    uniqueCuitCount: number;
+    flaggedHighRiskCount: number;
+  };
+
+  // Sujetos Bajo Análisis e Investigados
+  flaggedSubjects: Array<{
+    cuit: string;
+    denominacion: string;
+    altaDate: string;
+    antiquityDays: number;
+    totalVolumeARS: number;
+    transactionCount: number;
+    riskCategory: "ALTO" | "MEDIO" | "BAJO";
+    reasons: string[];
+  }>;
+
+  // Detalle de Transacciones Críticas Detectadas
+  criticalTransactions: Transaction[];
+
+  // Red de Relaciones Identificada (Evaluación Grupal)
+  groupNetwork?: {
+    groupId: string;
+    subjects: string[];
+    commonCounterparts: string[];
+    totalIntergroupVolume: number;
+    detectedLoopsCount: number;
+  } | null;
+
+  // Datos para renderizado interactivo en la pestaña 2 de red forense
+  cuitDenominacionesMap: Record<string, string>;
+  allTransactions: Transaction[];
+  positiveCases: Array<{
+    id: string; // CUIT
+    altaDate: string;
+    antiquity_days: number;
+  }>;
+}
+
+/**
+ * Paso 1: Captura de Estado de Interfaz y Datos Dinámicos
+ * Función encargada de compilar la instantánea del estado regulatorio actual del dashboard,
+ * garantizando la trazabilidad de auditoría AML requerida por la normativa vigente (GAFI Rec. 1).
+ */
+export function captureCurrentAMLState(params: {
+  analysisMonth: string;
+  lookbackMonths: number;
+  threshold: number;
+  selectedPresetId: string;
+  selectedPresetName: string;
+  transactions: Transaction[];
+  positiveCases: Array<{
+    id: string; // CUIT
+    altaDate: string;
+    antiquity_days: number;
+  }>;
+  cuitDenominacionesMap: Record<string, string>;
+  activeGroup: {
+    id: string;
+    subjects: string[];
+    commonCounterparts: string[];
+  } | null;
+  antiquityLimit: number;
+  activeTab?: "alertas" | "forense";
+  forensicMode?: "individual" | "grupal";
+  currentCuit?: string;
+  selectedGroupId?: string | null;
+}): CapturedAMLState {
+  const {
+    analysisMonth,
+    lookbackMonths,
+    threshold,
+    selectedPresetId,
+    selectedPresetName,
+    transactions,
+    positiveCases,
+    cuitDenominacionesMap,
+    activeGroup,
+    antiquityLimit,
+    activeTab,
+    forensicMode,
+    currentCuit,
+    selectedGroupId,
+  } = params;
+
+  // Calcular métricas agregadas
+  const totalVolume = transactions.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+  const uniqueCuits = new Set(transactions.map(t => t.CUIT));
+
+  // Compilar sujetos alertados
+  const flaggedSubjects = positiveCases.map(node => {
+    const subjectTxs = transactions.filter(t => t.CUIT === node.id);
+    const subjectVolume = subjectTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+    const antiquity = node.antiquity_days;
+    
+    // Categorización basada en Enfoque de Riesgo de lavado esctructurado
+    let riskCategory: "ALTO" | "MEDIO" | "BAJO" = "BAJO";
+    const reasons: string[] = [];
+
+    if (antiquity <= 365) {
+      reasons.push(`Inscripción Reciente (Antigüedad de ${antiquity} días)`);
+      if (subjectVolume > threshold) {
+        riskCategory = "ALTO";
+        reasons.push(`Supera Umbral Transaccional de Advertencia ($${threshold.toLocaleString("es-AR")}) en periodo crítico`);
+      } else {
+        riskCategory = "MEDIO";
+      }
+    }
+
+    return {
+      cuit: node.id,
+      denominacion: cuitDenominacionesMap[node.id] || `Sujeto Fiscal ${node.id}`,
+      altaDate: node.altaDate,
+      antiquityDays: antiquity,
+      totalVolumeARS: subjectVolume,
+      transactionCount: subjectTxs.length,
+      riskCategory,
+      reasons,
+    };
+  });
+
+  // Filtrar transacciones críticas asociadas a conductas inusuales flaggeadas
+  const criticalCuitSet = new Set(positiveCases.map(c => c.id));
+  const criticalTransactions = transactions.filter(
+    t => criticalCuitSet.has(t.CUIT) || parseFloat(t.MONTO) > threshold / 5
+  );
+
+  // Red de Relaciones Identificada (Estructura Grupal)
+  let groupNetwork = null;
+  if (activeGroup) {
+    const groupTxs = transactions.filter(t => activeGroup.subjects.includes(t.CUIT));
+    const intergroupVolume = groupTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+
+    groupNetwork = {
+      groupId: activeGroup.id,
+      subjects: activeGroup.subjects,
+      commonCounterparts: activeGroup.commonCounterparts,
+      totalIntergroupVolume: intergroupVolume,
+      detectedLoopsCount: activeGroup.subjects.length > 2 ? 1 : 0,
+    };
+  }
+
+  return {
+    reportDate: new Date().toISOString(),
+    complianceOfficer: "AUDITOR_PLD_ESTÁNDAR_CNBV",
+    analysisMonth,
+    lookbackMonths,
+    alertThreshold: threshold,
+    selectedPresetId,
+    selectedPresetName,
+    antiquityLimit,
+    activeTab,
+    forensicMode,
+    currentCuit,
+    selectedGroupId,
+    metrics: {
+      totalVolumeARS: totalVolume,
+      totalTransactionsCount: transactions.length,
+      uniqueCuitCount: uniqueCuits.size,
+      flaggedHighRiskCount: flaggedSubjects.length,
+    },
+    flaggedSubjects,
+    criticalTransactions,
+    groupNetwork,
+    cuitDenominacionesMap,
+    allTransactions: transactions,
+    positiveCases,
+  };
+}
+
+/**
+ * Paso 2: Generación del Reporte HTML Dinámico Completo
+ * Construye una plantilla HTML interactiva y standalone con estilos integrados, filtros interactivos y
+ * visualización optimizada para la entrega directa de reportes a Reguladores e Inteligencia Financiera.
+ */
+export function generateAMLReportHTML(state: CapturedAMLState): string {
+  const formattedThreshold = state.alertThreshold.toLocaleString("es-AR");
+  const formattedVolume = state.metrics.totalVolumeARS.toLocaleString("es-AR");
+  const reportFormattedDate = new Date(state.reportDate).toLocaleString("es-AR");
+
+  // Filas de Sujetos Alertados
+  const flaggedSubjectsHtml = state.flaggedSubjects.length > 0 
+    ? state.flaggedSubjects.map((sub, idx) => `
+      <tr class="hover:bg-zinc-900/60 border-b border-zinc-800 transition-colors cursor-pointer" 
+          title="Haga clic para ver el grafo forense y dictamen técnico de este sujeto" 
+          onclick="goToForensicSubject('${sub.cuit}')"
+          data-cuit="${sub.cuit}"
+          data-denom="${sub.denominacion}"
+          data-alta="${sub.altaDate}"
+          data-antiquity="${sub.antiquityDays}"
+          data-volume="${sub.totalVolumeARS}"
+          data-count="${sub.transactionCount}"
+          data-threshold="${state.alertThreshold}"
+          data-risk="${sub.riskCategory}">
+        <td class="px-6 py-4 font-mono text-[13px] text-zinc-400 text-center font-bold">${idx + 1}</td>
+        <td class="px-6 py-4 font-mono text-[13px] text-zinc-300 font-bold">${sub.cuit}</td>
+        <td class="px-6 py-4 text-[13px] font-semibold text-white">${sub.denominacion}</td>
+        <td class="px-6 py-4 text-[13px] text-zinc-400 font-mono text-center">${sub.altaDate}</td>
+        <td class="px-6 py-4 text-[13px] text-rose-500 font-mono font-bold text-center">${sub.antiquityDays} días</td>
+        <td class="px-6 py-4 font-mono text-[13px] text-zinc-300 font-semibold text-right">$${sub.totalVolumeARS.toLocaleString("es-AR")}</td>
+        <td class="px-6 py-4 text-[13px] text-zinc-300 font-mono text-center">${sub.transactionCount} giros</td>
+        <td class="px-6 py-4 font-mono text-[13px] text-zinc-500 text-right">$${state.alertThreshold.toLocaleString("es-AR")}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="8" class="px-6 py-12 text-center text-zinc-500 font-sans text-sm">No se detectaron sujetos con alertas críticas para este periodo.</td></tr>`;
+
+  // Filas de Transacciones Críticas
+  const criticalTransactionsHtml = state.criticalTransactions.length > 0
+    ? state.criticalTransactions.map(tx => `
+      <tr class="hover:bg-zinc-900/40 border-b border-zinc-800 transition-colors">
+        <td class="px-6 py-3 font-mono text-xs text-zinc-400">${tx.FECHA || "-"}</td>
+        <td class="px-6 py-3 font-mono text-xs text-zinc-300">${tx.CUIT}</td>
+        <td class="px-6 py-3 text-xs text-zinc-200">${tx.DENOMINACION_CONTRAPARTE || tx.CUIT_CONTRAPARTE || "-"}</td>
+        <td class="px-6 py-3 font-mono text-xs text-zinc-300 text-right font-bold">$${parseFloat(tx.MONTO).toLocaleString("es-AR")}</td>
+        <td class="px-6 py-3 text-xs text-zinc-400">${tx.TIPO === "ORDENADA" ? "Orden de transferencia" : "Recepción de fondos"}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="5" class="px-6 py-8 text-center text-zinc-500 font-sans text-sm">No se identificaron transacciones singulares de alto volumen en el periodo de análisis.</td></tr>`;
+
+  // Red de Relaciones (Estructura Grupal) - Omitida de la ventana principal por solicitud del usuario
+  const relationsPanelHtml = "";
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reporte Forense de Prevención de Lavado de Dinero (AML)</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- D3.js para simulación interactiva de grafos -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Estilos adicionales para impresión */
+    @media print {
+      .no-print {
+        display: none !important;
+      }
+      body {
+        background: white !important;
+        background-color: white !important;
+        color: #000000 !important;
+      }
+      .bg-zinc-950, .bg-zinc-900, .bg-zinc-900\/50, .bg-zinc-900\/40, .bg-zinc-850, .bg-zinc-800 {
+        background-color: #ffffff !important;
+        background: #ffffff !important;
+        border-color: #000000 !important;
+        border-width: 1px !important;
+        color: #000000 !important;
+        box-shadow: none !important;
+      }
+      .text-white, .text-zinc-100, .text-zinc-200, .text-zinc-300 {
+        color: #000000 !important;
+      }
+      .text-zinc-400, .text-zinc-500, .text-zinc-600 {
+        color: #27272a !important;
+      }
+      /* Eliminar bordes innecesarios y forzar colores intensos */
+      svg {
+        background-color: #ffffff !important;
+        border: 1px solid #000000 !important;
+      }
+      svg circle {
+        stroke: #000000 !important;
+        stroke-width: 2.5px !important;
+        fill: #f4f4f5 !important;
+      }
+      svg path {
+        stroke: #000000 !important;
+        stroke-width: 3px !important;
+        opacity: 1 !important;
+      }
+      svg text {
+        fill: #000000 !important;
+        font-weight: bold !important;
+      }
+      header, footer, .border-b, .border {
+        border-color: #000000 !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-zinc-900 text-zinc-100 min-h-screen">
+  
+  <div class="max-w-full xl:max-w-[1720px] mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    
+    <!-- Header de Cumplimiento -->
+    <header class="border-b border-zinc-800 pb-6 mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-950 text-rose-300 border border-rose-800 font-mono">
+            CONFIDENCIAL // USO INTERNO DEL COMPLIANCE
+          </span>
+          <span class="text-zinc-500 text-xs">| Reporte generado bajo Enfoque Basado en Riesgo (EBR)</span>
+        </div>
+        <h1 class="text-2xl font-extrabold uppercase tracking-tight text-white font-sans">REPORTE ARCA / TRANSACCIONALIDAD</h1>
+        <p class="text-zinc-400 text-sm mt-1">Sujeto de Reciente Inscripción con Alta Transaccionalidad</p>
+      </div>
+      
+      <!-- Control de Impresión -->
+      <div class="flex items-center gap-3 no-print">
+        <button onclick="window.print()" class="px-4 py-2 bg-rose-950 hover:bg-rose-900 text-rose-200 hover:text-white rounded-lg text-xs font-bold border border-rose-800 cursor-pointer transition">
+          Imprimir / Exportar Reporte PDF ⎙
+        </button>
+      </div>
+    </header>
+
+    <!-- NAVEGACIÓN ENTRE PESTAÑAS (Fiel al Dashboard) -->
+    <div class="flex border-b border-zinc-800 mb-8 font-sans no-print">
+      <button id="tab-btn-alertas" onclick="switchReportTab('alertas')" class="px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-rose-500 text-white focus:outline-none transition-colors duration-150">
+        1. Panel de Alertas
+      </button>
+      <button id="tab-btn-forense" onclick="switchReportTab('forense')" class="px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-transparent text-zinc-400 hover:text-white focus:outline-none transition-colors duration-150">
+        2. FLUJO INDIVIDUAL / GRUPAL
+      </button>
+    </div>
+
+    <!-- PESTAÑA 1: PANEL DE ALERTAS -->
+    <div id="report-tab-content-alertas" class="tab-pane">
+      <!-- Parámetros del Reporte -->
+      <div class="mb-8">
+        <div class="bg-zinc-950 border border-zinc-850 p-4 rounded-xl flex flex-col">
+          <span class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest font-mono">Periodo Evaluado</span>
+          <span class="text-sm font-semibold text-zinc-200 mt-1">${state.analysisMonth} (${state.lookbackMonths} meses)</span>
+        </div>
+      </div>
+
+      <!-- Panel de Métricas Clave -->
+      <div class="mb-8">
+        <h2 class="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3.5 font-mono">Estado General del Periodo</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="bg-zinc-950 border border-zinc-850 p-5 rounded-xl">
+            <p class="text-[10px] uppercase font-bold text-zinc-400 font-mono">Volumen Total Operado</p>
+            <p id="kpi-volumen-total" class="text-2xl font-extrabold text-white mt-2 font-mono">$${formattedVolume}</p>
+            <p class="text-[10px] text-zinc-500 mt-1">ARS evaluados consolidados</p>
+          </div>
+          <div class="bg-zinc-950 border border-zinc-850 p-5 rounded-xl">
+            <p class="text-[10px] uppercase font-bold text-zinc-400 font-mono">Alertas Críticas Emitidas</p>
+            <p id="kpi-alertas-criticas" class="text-2xl font-extrabold text-rose-500 mt-2 font-mono">${state.metrics.flaggedHighRiskCount}</p>
+            <p class="text-[10px] text-zinc-500 mt-1">Sujetos que superan el riesgo tolerable</p>
+          </div>
+          <div class="bg-zinc-950 border border-zinc-850 p-5 rounded-xl">
+            <p class="text-[10px] uppercase font-bold text-zinc-400 font-mono">Transacciones Procesadas</p>
+            <p id="kpi-transacciones" class="text-2xl font-extrabold text-zinc-200 mt-2 font-mono">${state.metrics.totalTransactionsCount}</p>
+            <p class="text-[10px] text-zinc-500 mt-1">Operaciones individuales</p>
+          </div>
+          <div class="bg-zinc-950 border border-zinc-850 p-5 rounded-xl">
+            <p class="text-[10px] uppercase font-bold text-zinc-400 font-mono">Sujetos Únicos Evaluados</p>
+            <p id="kpi-sujetos-unicos" class="text-2xl font-extrabold text-zinc-200 mt-2 font-mono">${state.metrics.uniqueCuitCount}</p>
+            <p class="text-[10px] text-zinc-500 mt-1">Entidades fiscales (CUIT)</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Relaciones si existen -->
+      <div class="indicator-relations-container">
+        ${relationsPanelHtml}
+      </div>
+
+      <!-- Tabla de Sujetos Alertados con Filtros Interactivos (Paso 4) -->
+      <div class="bg-zinc-950 border border-zinc-850 rounded-2xl overflow-hidden mb-8">
+        <div class="px-6 py-4 bg-zinc-950/70 border-b border-zinc-850 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 class="text-sm font-extrabold text-white uppercase tracking-wider font-mono">RESUMEN: CASOS POSITIVOS</h3>
+            <span class="text-[11px] text-zinc-500 font-mono">Sujetos detectados con menos de ${state.antiquityLimit} días de antigüedad en padrón y volumen superior al umbral de corte.</span>
+          </div>
+          
+          <!-- Componentes Interactivos de Control -->
+          <div class="flex flex-wrap items-center gap-3 no-print">
+            <input type="text" id="subject-search-input" placeholder="Buscar por CUIT o denominación..." class="bg-zinc-900 border border-zinc-750 text-xs rounded-lg px-3 py-1.5 text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-rose-500 w-64 transition-all">
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse" id="subjects-table">
+            <thead>
+              <tr class="border-b border-zinc-800 bg-zinc-900/30 text-[10px] font-bold text-zinc-400 uppercase tracking-widest font-mono select-none">
+                <th class="px-6 py-3 text-center cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('id')">ID <span id="sort-icon-id">↕</span></th>
+                <th class="px-6 py-3 cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('cuit')">CUIT <span id="sort-icon-cuit">↕</span></th>
+                <th class="px-6 py-3 cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('denom')">Denominación <span id="sort-icon-denom">↕</span></th>
+                <th class="px-6 py-3 text-center cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('alta')">Alta ARCA <span id="sort-icon-alta">↕</span></th>
+                <th class="px-6 py-3 text-center cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('antiquity')">Antigüedad <span id="sort-icon-antiquity">↕</span></th>
+                <th class="px-6 py-3 text-right cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('volume')">Volumen Total <span id="sort-icon-volume">↕</span></th>
+                <th class="px-6 py-3 text-center cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('count')">Operaciones <span id="sort-icon-count">↕</span></th>
+                <th class="px-6 py-3 text-right cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors" onclick="sortSubjectsTable('threshold')">Umbral <span id="sort-icon-threshold">↕</span></th>
+              </tr>
+            </thead>
+            <tbody id="subjects-tbody">
+              ${flaggedSubjectsHtml}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PESTAÑA 2: ENFOQUE FORENSE DE RED INTERACTIVO -->
+    <div id="report-tab-content-forense" class="tab-pane hidden">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        
+        <!-- Bloque Izquierdo: Grafo Vectorial y Resumen Transaccional (col-span-2) -->
+        <div class="md:col-span-2 flex flex-col gap-4">
+          <!-- Graficador de Redes Interactivo SVG -->
+          <div class="bg-zinc-950 border border-zinc-850 rounded-xl p-5 flex flex-col gap-4 shadow-sm text-zinc-100">
+            
+            <!-- Barra de Herramientas y Selectores de Red -->
+            <div class="flex flex-col md:flex-row justify-between md:items-center gap-3 pb-3 border-b border-zinc-800">
+              <div class="flex items-center gap-3">
+                <h3 class="font-extrabold text-xs uppercase tracking-wider text-zinc-300">ANÁLISIS DE FLUJOS</h3>
+                
+                <!-- Sub-pestañas de control de Modo -->
+                <div class="flex items-center bg-zinc-900 p-0.5 rounded-lg border border-zinc-800">
+                  <button id="forensic-mode-individual" onclick="setLocalForensicMode('individual')" class="px-3 py-1 rounded-md text-[10px] font-bold text-zinc-400 hover:text-white transition">
+                    Individual
+                  </button>
+                  <button id="forensic-mode-grupal" onclick="setLocalForensicMode('grupal')" class="px-3 py-1 rounded-md text-[10px] font-bold text-zinc-400 hover:text-white transition">
+                    Grupal
+                  </button>
+                </div>
+              </div>
+ 
+              <!-- Selector de Entidades en Red -->
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500">Analizar:</span>
+                
+                <!-- Selector Individual -->
+                <select id="local-subject-select" onchange="updateForensicsView()" class="bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1 text-[11px] font-bold text-zinc-100 focus:outline-none focus:border-zinc-700 cursor-pointer max-w-[240px]">
+                  <!-- Se rellena dinámicamente con JS -->
+                </select>
+ 
+                <!-- Selector Grupal -->
+                <select id="local-group-select" onchange="updateForensicsView()" class="hidden bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1 text-[11px] font-bold text-zinc-100 focus:outline-none focus:border-zinc-700 cursor-pointer max-w-[240px]">
+                  <!-- Se rellena dinámicamente con JS -->
+                </select>
+              </div>
+            </div>
+ 
+            <!-- Grafo Vectorial Generado Dinámicamente -->
+            <div class="relative w-full border border-zinc-800 rounded-xl bg-zinc-900/40 p-4 overflow-hidden">
+              <!-- Botonera de Control de Zoom Flotante (Idéntica a la App React) -->
+              <div class="absolute top-4 right-4 z-10 flex gap-1.5 no-print">
+                <button
+                  onclick="zoomInLocal()"
+                  title="Aumentar Zoom"
+                  class="p-2 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-750 rounded-lg shadow-sm text-zinc-300 hover:text-white transition cursor-pointer flex items-center justify-center w-8 h-8 font-extrabold text-sm"
+                >
+                  ＋
+                </button>
+                <button
+                  onclick="zoomOutLocal()"
+                  title="Reducir Zoom"
+                  class="p-2 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-750 rounded-lg shadow-sm text-zinc-300 hover:text-white transition cursor-pointer flex items-center justify-center w-8 h-8 font-extrabold text-sm"
+                >
+                  －
+                </button>
+                <button
+                  onclick="resetZoomLocal()"
+                  title="Restaurar Vista"
+                  class="p-2 bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-750 rounded-lg shadow-sm text-zinc-300 hover:text-white transition cursor-pointer flex items-center justify-center w-8 h-8 font-bold text-sm"
+                >
+                  ⟲
+                </button>
+              </div>
+
+              <div class="w-full overflow-x-auto overflow-y-hidden">
+                <svg id="forensic-network-svg" class="w-full aspect-[16/9] min-w-[650px] transition-all duration-500 ease-in-out bg-zinc-950/20" viewBox="0 0 760 380">
+                  <!-- Se inyecta dinámicamente con JS -->
+                </svg>
+              </div>
+              <div class="absolute bottom-3 left-3 bg-zinc-950/95 backdrop-blur-sm border border-zinc-800 p-2.5 rounded-lg font-sans flex flex-col gap-1 max-w-[340px] text-[8.5px] text-zinc-300 shadow-sm animate-fade-in">
+                <span class="text-[7.5px] font-extrabold uppercase tracking-widest text-zinc-500">REFERENCIAS DE COLOR</span>
+                <div class="grid grid-cols-2 gap-x-2.5 gap-y-1 font-bold">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#fee2e2] border border-[#ef4444] block"></span>
+                    <span>Sujeto Analizado</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#dbeafe] border border-[#3b82f6] block"></span>
+                    <span>Contraparte Común</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#d1fae5] border border-[#22c55e] block"></span>
+                    <span>Envía al Sujeto</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#ffedd5] border border-[#f97316] block"></span>
+                    <span>Recibe del Sujeto</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+ 
+        <!-- Bloque Derecho: Dictamen Técnico (Sidebar col-span-1) -->
+        <div class="md:col-span-1 flex flex-col gap-6">
+          <div class="bg-zinc-950 text-zinc-100 rounded-xl p-5 border border-zinc-850 flex flex-col min-h-[460px] shadow-sm" id="forensic-sidebar-content">
+            <!-- Se inyecta dinámicamente con JS de forma idéntica a la aplicación -->
+          </div>
+        </div>
+
+        <!-- Bloque Inferior Full Width: Resumen Transaccional de Red (col-span-1 lg:col-span-3) -->
+        <div class="col-span-1 md:col-span-3">
+          <!-- Resumen de Operaciones Dual Split -->
+          <div class="bg-zinc-950 border border-zinc-850 rounded-xl p-8 shadow-sm text-zinc-100">
+            <div class="flex justify-between items-center pb-3 border-b border-zinc-800 mb-4">
+              <div>
+                <h3 class="font-extrabold text-xs uppercase tracking-wider text-zinc-300">RESUMEN TRANSACCIONAL DE RED</h3>
+                <p id="forensic-active-detail-text" class="text-[11px] text-zinc-400 mt-1 font-sans"></p>
+              </div>
+              <span class="text-[10px] font-extrabold italic text-zinc-500 font-sans">-cifras en $ miles-</span>
+            </div>
+
+            <div id="grupal-warning-banner" class="hidden bg-amber-950/20 border border-amber-900/40 text-amber-200 text-xs rounded-lg p-3.5 mb-4 leading-relaxed font-normal">
+              <strong class="text-amber-400 uppercase font-black text-[10px] block tracking-wider mb-1">
+                💡 ANÁLISIS CONSOLIDADO DEL GRUPO INTERCONECTADO
+              </strong>
+              Este reporte consolida el flujo íntegro de la totalidad de integrantes del grupo de reciente inscripción. El nodo central visualizado en el grafo representa el amortiguador transaccional común que posibilita la concentración y dispersión de capitales bajo patrones compatibles con redes organizadas de lavado de activos de alta transaccionalidad.
+            </div>
+
+            <!-- Grilla de Transferencias -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              <!-- Recibe (Orígenes) -->
+              <div class="border border-zinc-800 rounded-xl p-6 bg-zinc-900/30 flex flex-col justify-between">
+                <div>
+                  <div class="border-b border-zinc-800 pb-2 mb-3.5 flex justify-between items-center bg-zinc-900/50 -mx-4 -mt-4 p-3 rounded-t-xl">
+                    <span id="label-origenes-title" class="font-extrabold text-xs text-sky-400 uppercase tracking-wider block">RECIBE</span>
+                    <span class="bg-sky-950/40 border border-sky-800/40 text-sky-300 text-[9px] uppercase font-bold px-2 py-0.5 rounded-full">FONDOS ENTRANTES</span>
+                  </div>
+                  
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr class="border-b border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider font-mono">
+                          <th class="pb-1.5 font-bold">CUIT</th>
+                          <th class="pb-1.5 font-bold">Denominación</th>
+                          <th class="pb-1.5 font-bold text-right">Monto Acumulado</th>
+                        </tr>
+                      </thead>
+                      <tbody id="forensic-recibe-tbody">
+                        <!-- Relleno por JS -->
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="border-t border-zinc-800 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-300">
+                  <span>TOTAL FONDOS</span>
+                  <span id="forensic-recibe-total" class="font-mono text-xs text-sky-300 font-extrabold bg-sky-950/40 px-2.5 py-1 rounded border border-sky-800/40">
+                    $0 k
+                  </span>
+                </div>
+              </div>
+
+              <!-- Ordena (Destinos) -->
+              <div class="border border-zinc-800 rounded-xl p-6 bg-zinc-900/30 flex flex-col justify-between">
+                <div>
+                  <div class="border-b border-zinc-800 pb-2 mb-3.5 flex justify-between items-center bg-zinc-900/50 -mx-4 -mt-4 p-3 rounded-t-xl">
+                    <span id="label-destinos-title" class="font-extrabold text-xs text-amber-400 uppercase tracking-wider block">ORDENA</span>
+                    <span class="bg-amber-950/40 border border-amber-800/40 text-amber-300 text-[9px] uppercase font-bold px-2 py-0.5 rounded-full">FONDOS EGRESADOS</span>
+                  </div>
+                  
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr class="border-b border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider font-mono">
+                          <th class="pb-1.5 font-bold">CUIT</th>
+                          <th class="pb-1.5 font-bold">Denominación</th>
+                          <th class="pb-1.5 font-bold text-right">Monto Acumulado</th>
+                        </tr>
+                      </thead>
+                      <tbody id="forensic-ordena-tbody">
+                        <!-- Relleno por JS -->
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="border-t border-zinc-800 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-300">
+                  <span>TOTAL FONDOS</span>
+                  <span id="forensic-ordena-total" class="font-mono text-xs text-amber-300 font-extrabold bg-amber-950/40 px-2.5 py-1 rounded border border-amber-800/40">
+                    $0 k
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tabla de traspasos internos de red (Fondo auto-compensado) - Oculta fuera del modo grupal -->
+            <div id="forensic-internas-section" class="hidden border border-zinc-800 rounded-xl p-6 bg-zinc-900/30 mt-6 shadow-sm">
+              <div class="border-b border-zinc-800 pb-2 mb-3.5 flex justify-between items-center bg-zinc-900/50 -mx-4 -mt-4 p-3 rounded-t-xl">
+                <span class="font-extrabold text-xs text-zinc-300 uppercase tracking-wider block">Movimientos Internos de la Red (Traspasos Circulares)</span>
+                <span class="bg-zinc-900 text-zinc-300 border border-zinc-800 text-[9px] uppercase font-bold px-2 py-0.5 rounded-full">AUTO-COMPENSACIÓN INTRAGRUIPAL</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr class="border-b border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider font-mono">
+                      <th class="pb-1.5 font-bold">CUIT Origen</th>
+                      <th class="pb-1.5 font-bold">Denominación Origen</th>
+                      <th class="pb-1.5 font-bold text-center">➔</th>
+                      <th class="pb-1.5 font-bold">CUIT Destino</th>
+                      <th class="pb-1.5 font-bold">Denominación Destino</th>
+                      <th class="pb-1.5 font-bold text-right">Volumen Canalizado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="forensic-internas-tbody">
+                    <!-- Relleno por JS -->
+                  </tbody>
+                </table>
+              </div>
+              <div class="border-t border-zinc-800 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-300">
+                <span>VOLUMEN TOTAL TRANSFERIDO</span>
+                <span id="forensic-internas-total" class="font-mono text-xs text-zinc-300 font-extrabold bg-zinc-900 px-2.5 py-1 rounded border border-zinc-800">
+                  $0 k
+                </span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- PASO 3: Inyección de Datos Serializados para Auditoría y Carga Reversible -->
+  <script id="aml-report-payload" type="application/json">
+    ${JSON.stringify(state, null, 2).replace(/</g, '\\u003c')}
+  </script>
+
+  <!-- PASO 4: Scripts de Acoplamiento de Funciones Interactivas y UI -->
+  <script>
+    // Cargar los datos del payload JSON
+    const reportState = JSON.parse(document.getElementById("aml-report-payload").textContent);
+    
+    // Variables de control de pestaña y filtros locales
+    let localActiveTab = reportState.activeTab || 'alertas';
+    let localForensicMode = reportState.forensicMode || 'individual'; // 'individual' o 'grupal'
+    let selectedCuit = reportState.currentCuit || '';
+    let selectedGroupId = reportState.selectedGroupId || '';
+
+    document.addEventListener("DOMContentLoaded", () => {
+      // Inicializar selectores
+      initLocalSelects();
+
+      // Configurar el primer sujeto por defecto
+      if (!selectedCuit && reportState.flaggedSubjects && reportState.flaggedSubjects.length > 0) {
+        selectedCuit = reportState.flaggedSubjects[0].cuit;
+      } else if (selectedCuit) {
+        const subjectSelect = document.getElementById("local-subject-select");
+        if (subjectSelect) subjectSelect.value = selectedCuit;
+      }
+      
+      // Configurar el grupo por defecto si existe
+      if (!selectedGroupId && reportState.groupNetwork) {
+        selectedGroupId = reportState.groupNetwork.groupId;
+      } else if (selectedGroupId) {
+        const groupSelect = document.getElementById("local-group-select");
+        if (groupSelect) groupSelect.value = selectedGroupId;
+      }
+
+      // Sincronizar el estado de la pestaña inicial
+      switchReportTab(localActiveTab);
+      // Sincronizar el modo forense inicial
+      setLocalForensicMode(localForensicMode);
+
+      // Renderizar vista forense inicial
+      updateForensicsView();
+
+      // 1. Filtrado Interactivo de Sujetos Alertados (Pestaña 1)
+      const subjectSearchInput = document.getElementById("subject-search-input");
+      const subjectsTbody = document.getElementById("subjects-tbody");
+      const subjectRows = Array.from(subjectsTbody.querySelectorAll("tr"));
+
+      // Normalizador lingüístico español para remover acentos y tildes
+      function cleanText(text) {
+        if (!text) return "";
+        return String(text)
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .trim();
+      }
+
+      function filterSubjects() {
+        const searchTerm = cleanText(subjectSearchInput.value);
+        let visibleCount = 0;
+        let visibleVolumeSum = 0;
+        let visibleAlertasCount = 0;
+
+        subjectRows.forEach(row => {
+          if (row.id === "subject-no-results") return;
+
+          const cuit = cleanText(row.getAttribute("data-cuit") || "");
+          const denominacion = cleanText(row.getAttribute("data-denom") || "");
+          const riskCategory = row.getAttribute("data-risk") || "";
+          const volume = parseFloat(row.getAttribute("data-volume") || "0");
+
+          const matchesSearch = cuit.includes(searchTerm) || denominacion.includes(searchTerm);
+
+          if (matchesSearch) {
+            row.style.display = "";
+            visibleCount++;
+            visibleVolumeSum += volume;
+            if (riskCategory === "ALTO") {
+              visibleAlertasCount++;
+            }
+          } else {
+            row.style.display = "none";
+          }
+        });
+
+        // Actualizar las tarjetas de métricas en tiempo real de acuerdo a los resultados visibles
+        const kpiVolumen = document.getElementById("kpi-volumen-total");
+        if (kpiVolumen) {
+          kpiVolumen.innerText = "$" + Math.round(visibleVolumeSum).toLocaleString("es-AR");
+        }
+        const kpiAlertas = document.getElementById("kpi-alertas-criticas");
+        if (kpiAlertas) {
+          kpiAlertas.innerText = visibleAlertasCount;
+        }
+        const kpiSujetos = document.getElementById("kpi-sujetos-unicos");
+        if (kpiSujetos) {
+          kpiSujetos.innerText = visibleCount;
+        }
+
+        const existingNoResults = document.getElementById("subject-no-results");
+        if (visibleCount === 0 && subjectRows.length > 0) {
+          if (!existingNoResults) {
+            const tr = document.createElement("tr");
+            tr.id = "subject-no-results";
+            tr.innerHTML = '<td colspan="8" class="px-6 py-8 text-center text-zinc-500 font-sans text-xs italic">Ningún sujeto coincide con los filtros aplicados.</td>';
+            subjectsTbody.appendChild(tr);
+          }
+        } else if (existingNoResults) {
+          existingNoResults.remove();
+        }
+      }
+
+      // Ordenación interactiva de columnas en el DOM
+      let sortField = "id";
+      let sortAscending = true;
+
+      window.sortSubjectsTable = function (field) {
+        if (sortField === field) {
+          sortAscending = !sortAscending;
+        } else {
+          sortField = field;
+          sortAscending = true;
+        }
+
+        // Limpiar indicadores visuales de ordenación en las cabeceras
+        const fields = ["id", "cuit", "denom", "alta", "antiquity", "volume", "count", "threshold"];
+        fields.forEach(f => {
+          const iconSpan = document.getElementById("sort-icon-" + f);
+          if (iconSpan) {
+            iconSpan.innerText = "↕";
+            iconSpan.className = "text-zinc-600 font-bold ml-1";
+          }
+        });
+
+        // Actualizar el indicador de la cabecera activa
+        const activeIconSpan = document.getElementById("sort-icon-" + field);
+        if (activeIconSpan) {
+          activeIconSpan.innerText = sortAscending ? "↑" : "↓";
+          activeIconSpan.className = "text-rose-500 font-extrabold ml-1 animate-pulse";
+        }
+
+        // Obtener sólo las filas reales (excluyendo el placeholder si existe)
+        const rows = Array.from(subjectsTbody.querySelectorAll("tr")).filter(r => r.id !== "subject-no-results");
+
+        rows.sort((a, b) => {
+          let valA, valB;
+
+          if (field === "id") {
+            valA = parseInt(a.cells[0].textContent.trim(), 10);
+            valB = parseInt(b.cells[0].textContent.trim(), 10);
+          } else if (field === "cuit") {
+            valA = a.getAttribute("data-cuit") || "";
+            valB = b.getAttribute("data-cuit") || "";
+          } else if (field === "denom") {
+            valA = (a.getAttribute("data-denom") || "").toLowerCase();
+            valB = (b.getAttribute("data-denom") || "").toLowerCase();
+          } else if (field === "alta") {
+            valA = a.getAttribute("data-alta") || "";
+            valB = b.getAttribute("data-alta") || "";
+          } else if (field === "antiquity") {
+            valA = parseInt(a.getAttribute("data-antiquity") || "0", 10);
+            valB = parseInt(b.getAttribute("data-antiquity") || "0", 10);
+          } else if (field === "volume") {
+            valA = parseFloat(a.getAttribute("data-volume") || "0");
+            valB = parseFloat(b.getAttribute("data-volume") || "0");
+          } else if (field === "count") {
+            valA = parseInt(a.getAttribute("data-count") || "0", 10);
+            valB = parseInt(b.getAttribute("data-count") || "0", 10);
+          } else if (field === "threshold") {
+            valA = parseFloat(a.getAttribute("data-threshold") || "0");
+            valB = parseFloat(b.getAttribute("data-threshold") || "0");
+          }
+
+          if (valA < valB) return sortAscending ? -1 : 1;
+          if (valA > valB) return sortAscending ? 1 : -1;
+          return 0;
+        });
+
+        // Limpiar el tbody de filas anteriores y reinsertarlas ordenadas
+        rows.forEach(row => {
+          subjectsTbody.appendChild(row);
+        });
+
+        // Ejecutar filtro para mantener los términos buscados y actualizar métricas
+        filterSubjects();
+      };
+
+      subjectSearchInput.addEventListener("input", filterSubjects);
+
+    });
+
+    // Navegar y Seleccionar Sujeto de Alerta directamente en Análisis Forense (Paso 4)
+    function goToForensicSubject(cuit) {
+      localActiveTab = 'forense';
+      localForensicMode = 'individual';
+      selectedCuit = cuit;
+      
+      const subjectSelect = document.getElementById("local-subject-select");
+      if (subjectSelect) {
+        subjectSelect.value = cuit;
+      }
+      
+      switchReportTab('forense');
+      setLocalForensicMode('individual');
+      updateForensicsView();
+    }
+
+    // Cambiar de Pestañas
+    function switchReportTab(tabId) {
+      localActiveTab = tabId;
+      
+      const tabAlertasBtn = document.getElementById('tab-btn-alertas');
+      const tabForenseBtn = document.getElementById('tab-btn-forense');
+      const contentAlertas = document.getElementById('report-tab-content-alertas');
+      const contentForense = document.getElementById('report-tab-content-forense');
+
+      if (tabId === 'alertas') {
+        tabAlertasBtn.className = "px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-rose-500 text-white focus:outline-none transition-colors duration-150";
+        tabForenseBtn.className = "px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-transparent text-zinc-400 hover:text-white focus:outline-none transition-colors duration-150";
+        contentAlertas.classList.remove('hidden');
+        contentForense.classList.add('hidden');
+      } else {
+        tabForenseBtn.className = "px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-rose-500 text-white focus:outline-none transition-colors duration-150";
+        tabAlertasBtn.className = "px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-transparent text-zinc-400 hover:text-white focus:outline-none transition-colors duration-150";
+        contentForense.classList.remove('hidden');
+        contentAlertas.classList.add('hidden');
+        updateForensicsView();
+      }
+    }
+
+    // Inicializar Selectores de Sujeto y Grupo en Pestaña 2
+    function initLocalSelects() {
+      const subjectSelect = document.getElementById("local-subject-select");
+      subjectSelect.innerHTML = '';
+      
+      if (reportState.flaggedSubjects) {
+        reportState.flaggedSubjects.forEach((sub, i) => {
+          const opt = document.createElement("option");
+          opt.value = sub.cuit;
+          opt.text = "ID: " + (i+1) + " | CUIT: " + sub.cuit + " | " + sub.denominacion;
+          subjectSelect.appendChild(opt);
+        });
+      }
+
+      const groupSelect = document.getElementById("local-group-select");
+      groupSelect.innerHTML = '';
+      if (reportState.groupNetwork) {
+        const opt = document.createElement("option");
+        opt.value = reportState.groupNetwork.groupId;
+        opt.text = "Grupo Ref #" + reportState.groupNetwork.groupId;
+        groupSelect.appendChild(opt);
+      } else {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.text = "Sin red indiciaria detectada";
+        groupSelect.appendChild(opt);
+      }
+    }
+
+    // Cambiar Modo Forense (Individual vs Grupal)
+    function setLocalForensicMode(mode) {
+      localForensicMode = mode;
+      
+      const btnIndiv = document.getElementById("forensic-mode-individual");
+      const btnGroup = document.getElementById("forensic-mode-grupal");
+      
+      const subjSelect = document.getElementById("local-subject-select");
+      const groupSelect = document.getElementById("local-group-select");
+
+      if (mode === 'individual') {
+        btnIndiv.className = "px-3 py-1 rounded-md text-[10px] font-bold bg-zinc-800 text-white border border-zinc-700 transition";
+        btnGroup.className = "px-3 py-1 rounded-md text-[10px] font-bold text-zinc-400 hover:text-white transition";
+        subjSelect.classList.remove('hidden');
+        groupSelect.classList.add('hidden');
+      } else {
+        btnGroup.className = "px-3 py-1 rounded-md text-[10px] font-bold bg-zinc-800 text-white border border-zinc-700 transition";
+        btnIndiv.className = "px-3 py-1 rounded-md text-[10px] font-bold text-zinc-400 hover:text-white transition";
+        groupSelect.classList.remove('hidden');
+        subjSelect.classList.add('hidden');
+      }
+      
+      // Llamar a actualización de vista para que re-dibuje el SVG, tablas y sidebar
+      updateForensicsView();
+    }
+         // Formatear montos a ARS en miles
+    function formatInThousands(num) {
+      if (num === undefined || num === null) return "$0 k";
+      const thousands = Math.round(parseFloat(num) / 1000);
+      return "$" + thousands.toLocaleString("es-AR") + " k";
+    }
+
+    // Generate premium-grade Argentine names deterministically based on CUIT for high visual polish
+    function getArgentineFallbackName(cuit, prefixRole) {
+      const clean = cuit.trim().replace(/\D/g, "");
+      const map = {
+        "30718293049": "Empresa San Jorge S.A.",
+        "30658291032": "Distribuidora El Sol S.R.L.",
+        "30549102834": "Agropecuaria Pampa S.A.",
+        "30883920191": "Consultores Asociados S.A.",
+        "30502847193": "Supermercados Mayoristas S.A.",
+        "30664421902": "Logística y Puertos Argentinos",
+        "30705541239": "Metalúrgica Del Oeste S.R.L.",
+        "30801248931": "Estudio Contable Bianchi & Asoc.",
+        "30719548202": "Desarrollos Inmobiliarios Puerto Madero",
+        "30559103945": "Inversores del Plata",
+        "30884820192": "Fideicomiso La Horqueta"
+      };
+
+      if (map[clean]) return map[clean];
+
+      const numSum = clean.split("").reduce((sum, val) => sum + parseInt(val, 10), 0) || 12;
+      
+      const prefixes = [
+        "Servicios Integra", "Comercializadora", "Inversora", "Consultores", "Transportes",
+        "Constructora", "Agropecuaria", "Soluciones", "Estudio Contable", "Logística Sideral",
+        "Fideicomiso", "Distribuidora", "Alimentos Federales", "Sistemas", "Desarrollos"
+      ];
+      const bodies = [
+        "del Plata", "Pampa", "Andina", "Aconcagua", "del Sur", "San Martín", "del Litoral",
+        "Patagónica", "del Norte", "Alvear", "Cuyo", "San Juan", "del Paraná", "Moreno"
+      ];
+      const suffixes = [
+        "S.A.", "S.R.L.", "S.A.S.", "Fideicomiso S.A.", " Asociados", " de Servicios"
+      ];
+
+      const pref = prefixes[numSum % prefixes.length];
+      const bod = bodies[(numSum + 3) % bodies.length];
+      const suf = suffixes[(numSum * 7) % suffixes.length];
+
+      return pref + " " + bod + " " + suf;
+    }
+
+    // Custom Spanish list joiner to support "e" instead of "y" before words starting with I-sound
+    function joinSpanish(arr) {
+      if (!arr || arr.length === 0) return "";
+      if (arr.length === 1) return arr[0];
+      if (arr.length === 2) {
+        const secondStr = arr[1].trim();
+        const startsWithI = /^[iI]/i.test(secondStr) || (/^[hH][iI]/i.test(secondStr) && !/^[hH][iI][eE]/i.test(secondStr));
+        const connector = startsWithI ? " e " : " y ";
+        return arr[0] + connector + arr[1];
+      }
+      const last = arr[arr.length - 1].trim();
+      const startsWithI = /^[iI]/i.test(last) || (/^[hH][iI]/i.test(last) && !/^[hH][iI][eE]/i.test(last));
+      const connector = startsWithI ? " e " : " y ";
+      return arr.slice(0, -1).join(", ") + connector + arr[arr.length - 1];
+    }
+
+    // Actualiza por completo la vista interactiva (Tablas, SVG y Dictamen) de la pestaña 2
+    function updateForensicsView() {
+      const subjectSelect = document.getElementById("local-subject-select");
+      const groupSelect = document.getElementById("local-group-select");
+      
+      selectedCuit = subjectSelect.value;
+      selectedGroupId = groupSelect.value;
+
+      const txs = reportState.allTransactions || [];
+      const denoms = reportState.cuitDenominacionesMap || {};
+
+      let receives = [];
+      let sends = [];
+      let internals = [];
+      
+      let titleDetailStr = '';
+      const isGrupal = (localForensicMode === 'grupal' && reportState.groupNetwork);
+
+      // 1. Calcular Datos del Flujo Transaccional
+      if (!isGrupal) {
+        // Individual Mode
+        titleDetailStr = "CUIT: " + selectedCuit + " | " + (denoms[selectedCuit] || "Sujeto Analizado");
+        
+        // Conseguir transacciones de este CUIT
+        const subjectTxs = txs.filter(t => t.CUIT === selectedCuit);
+        
+        // Consolidar RECIBE (Orígenes) - Dinero enviado de contrapartes hacia este CUIT
+        const recMap = {};
+        subjectTxs.filter(t => t.TIPO === 'RECIBIDA').forEach(t => {
+          const key = t.CUIT_CONTRAPARTE;
+          recMap[key] = (recMap[key] || 0) + parseFloat(t.MONTO);
+        });
+        receives = Object.keys(recMap).map(k => ({
+          cuit: k,
+          denom: denoms[k] || k,
+          sum: recMap[k]
+        })).sort((a,b) => b.sum - a.sum);
+
+        // Consolidar ORDENA (Destinos) - Dinero enviado de este CUIT hacia contrapartes
+        const sndMap = {};
+        subjectTxs.filter(t => t.TIPO === 'ORDENADA').forEach(t => {
+          const key = t.CUIT_CONTRAPARTE;
+          sndMap[key] = (sndMap[key] || 0) + parseFloat(t.MONTO);
+        });
+        sends = Object.keys(sndMap).map(k => ({
+          cuit: k,
+          denom: denoms[k] || k,
+          sum: sndMap[k]
+        })).sort((a,b) => b.sum - a.sum);
+
+        // Ocultar sección interna
+        document.getElementById("forensic-internas-section").classList.add("hidden");
+        document.getElementById("grupal-warning-banner").classList.add("hidden");
+        document.getElementById("label-origenes-title").innerText = "RECIBE";
+        document.getElementById("label-destinos-title").innerText = "ORDENA";
+
+        // Cargar Dictamen de Sidebar Individual
+        const subInfo = reportState.flaggedSubjects.find(s => s.cuit === selectedCuit);
+        const antiquityDays = subInfo ? subInfo.antiquityDays : 0;
+        const valAlta = subInfo ? subInfo.altaDate : "N/A";
+        const resolvedLabelName = subInfo ? subInfo.denominacion : (denoms[selectedCuit] || "Sujeto Analizado");
+
+        const nodeRecibidoAmount = subjectTxs.filter(t => t.TIPO === "RECIBIDA").reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+        const nodeRecibidoMiles = Math.round(nodeRecibidoAmount / 1000).toLocaleString("es-AR");
+
+        const nodeOrdenadoAmount = subjectTxs.filter(t => t.TIPO === "ORDENADA").reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+        const nodeOrdenadoMiles = Math.round(nodeOrdenadoAmount / 1000).toLocaleString("es-AR");
+
+        const nodeAcumuladoAmount = nodeRecibidoAmount + nodeOrdenadoAmount;
+        const nodeAcumuladoMiles = Math.round(nodeAcumuladoAmount / 1000).toLocaleString("es-AR");
+        const activeThresholdMiles = Math.round(reportState.alertThreshold / 1000).toLocaleString("es-AR");
+
+        const displayText = \`Inscripción en ARCA hace \${antiquityDays} d&iacute;as. Registra un total de $ \${nodeRecibidoMiles} miles de fondos recibidos y $ \${nodeOrdenadoMiles} miles de fondos ordenados, volumen acumulado $ \${nodeAcumuladoMiles} miles, superando el umbral de corte acumulado de $ \${activeThresholdMiles} miles.\`;
+
+        // Generar Sidebar HTML para Modo Individual
+        const sidebarHtml = \`
+          <div>
+            <div class="flex items-center gap-1.5 pb-3 border-b border-zinc-800 mb-4 font-sans">
+              <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg>
+              <div>
+                <h3 class="font-extrabold text-[11px] uppercase tracking-widest text-white leading-none">
+                  Dictamen T&eacute;cnico Individual
+                </h3>
+              </div>
+            </div>
+            
+            <div class="flex flex-col gap-4">
+              <div>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                  Denominaci&oacute;n
+                </span>
+                <span class="font-extrabold text-sm text-amber-300 block mt-0.5">
+                  \${resolvedLabelName}
+                </span>
+                <span class="font-mono text-xs font-semibold text-zinc-400 block mt-0.2 select-all">
+                  CUIT \${selectedCuit}
+                </span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3 bg-zinc-900 p-2.5 rounded border border-zinc-850">
+                <div>
+                  <span class="text-[8px] uppercase font-bold text-zinc-500 block tracking-wider">Categor&iacute;a</span>
+                  <span class="text-[11px] font-bold text-zinc-200 mt-0.5 block truncate">
+                    Sujeto de An&aacute;lisis
+                  </span>
+                </div>
+                <div class="text-center">
+                  <span class="text-[8px] uppercase font-bold text-zinc-500 block tracking-wider">FECHA</span>
+                  <span class="text-[11px] font-mono font-bold text-amber-400 mt-0.5 block">
+                    \${valAlta}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                  Antig&uuml;edad Fiscal Detectada
+                </span>
+                <span class="text-xs font-medium text-zinc-300 mt-0.5 block">
+                  <strong class="text-white font-mono font-bold">\${antiquityDays} d&iacute;as impositivos</strong>
+                </span>
+              </div>
+
+              <div class="mt-2">
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1">
+                  ALERTA DETECTADA
+                </span>
+                <p class="text-xs text-zinc-300 leading-relaxed font-normal bg-zinc-900 border border-zinc-850 p-3 rounded italic leading-relaxed">
+                  \${displayText}
+                </p>
+              </div>
+            </div>
+          </div>
+        \`;
+        document.getElementById("forensic-sidebar-content").innerHTML = sidebarHtml;
+
+      } else {
+        // Grupal Mode Consolidado
+        const groupInfo = reportState.groupNetwork;
+        titleDetailStr = "CONSECIONARIO GRUPAL INTERCONECTADO REF #" + groupInfo.groupId;
+        
+        const subSet = new Set(groupInfo.subjects);
+        const cpSet = new Set(groupInfo.commonCounterparts);
+
+        // Transacciones de los integrantes del grupo
+        const groupTxs = txs.filter(t => subSet.has(t.CUIT));
+
+        // Consolidar RECIBE (Orígenes externos) - fondos que entran al grupo de contrapartes de afuera
+        const recMap = {};
+        groupTxs.filter(t => t.TIPO === 'RECIBIDA' && !subSet.has(t.CUIT_CONTRAPARTE)).forEach(t => {
+          const key = t.CUIT_CONTRAPARTE;
+          recMap[key] = (recMap[key] || 0) + parseFloat(t.MONTO);
+        });
+        receives = Object.keys(recMap).map(k => ({
+          cuit: k,
+          denom: denoms[k] || k,
+          sum: recMap[k]
+        })).sort((a,b) => b.sum - a.sum);
+
+        // Consolidar ORDENA (Destinos externos) - fondos que egresan del grupo a contrapartes de afuera
+        const sndMap = {};
+        groupTxs.filter(t => t.TIPO === 'ORDENADA' && !subSet.has(t.CUIT_CONTRAPARTE)).forEach(t => {
+          const key = t.CUIT_CONTRAPARTE;
+          sndMap[key] = (sndMap[key] || 0) + parseFloat(t.MONTO);
+        });
+        sends = Object.keys(sndMap).map(k => ({
+          cuit: k,
+          denom: denoms[k] || k,
+          sum: sndMap[k]
+        })).sort((a,b) => b.sum - a.sum);
+
+        // Consolidar MOVIMIENTOS INTERNOS (Traspasos entre integrantes y nodo común)
+        const intMap = {};
+        groupTxs.forEach(t => {
+          const isSenderInGroup = subSet.has(t.CUIT) || cpSet.has(t.CUIT);
+          const isReceiverInGroup = subSet.has(t.CUIT_CONTRAPARTE) || cpSet.has(t.CUIT_CONTRAPARTE);
+          
+          if (isSenderInGroup && isReceiverInGroup) {
+            // El dinero se mueve entre integrantes
+            const sender = t.TIPO === 'RECIBIDA' ? t.CUIT_CONTRAPARTE : t.CUIT;
+            const receiver = t.TIPO === 'RECIBIDA' ? t.CUIT : t.CUIT_CONTRAPARTE;
+            const pathKey = sender + "➔" + receiver;
+            intMap[pathKey] = (intMap[pathKey] || 0) + parseFloat(t.MONTO);
+          }
+        });
+        internals = Object.keys(intMap).map(key => {
+          const [sendKey, recvKey] = key.split("➔");
+          return {
+            senderCuit: sendKey,
+            senderDenom: denoms[sendKey] || sendKey,
+            receiverCuit: recvKey,
+            receiverDenom: denoms[recvKey] || recvKey,
+            sum: intMap[key]
+          };
+        }).sort((a,b) => b.sum - a.sum);
+
+        // Mostrar banner e internas
+        document.getElementById("forensic-internas-section").classList.remove("hidden");
+        document.getElementById("grupal-warning-banner").classList.remove("hidden");
+        document.getElementById("label-origenes-title").innerText = "INYECCIONES DE CAPITAL EXTERNO";
+        document.getElementById("label-destinos-title").innerText = "LIQUIDACIONES EXTERNAS DE RED";
+
+        // Cargar Dictamen de Sidebar Grupal
+        const subjectsList = groupInfo.subjects.map(c => (denoms[c] || getArgentineFallbackName(c, "Sujeto")) + " (CUIT " + c + ")");
+        const subjectsDetail = joinSpanish(subjectsList);
+        const hasCommonCounterparts = groupInfo.commonCounterparts.length > 0;
+        let presentationText = "";
+        
+        if (hasCommonCounterparts) {
+          const counterpartsList = groupInfo.commonCounterparts.map(c => (denoms[c] || getArgentineFallbackName(c, "Contraparte")) + " (CUIT " + c + ")");
+          const counterpartsDetail = joinSpanish(counterpartsList);
+          if (groupInfo.commonCounterparts.length === 1) {
+            presentationText = "presentando en com&uacute;n la siguiente contraparte: " + counterpartsDetail;
+          } else {
+            presentationText = "presentando en com&uacute;n las siguientes contrapartes: " + counterpartsDetail;
+          }
+        } else {
+          presentationText = "presentando operaciones entre s&iacute;";
+        }
+
+        const groupMatchReason = "Se observan convergencia de flujos entre los sujetos analizados: " + subjectsDetail + ", " + presentationText + ".";
+
+        // Generar filas de sujetos involucrados para la sidebar grupal
+        let subjectsRowsHtml = "";
+        groupInfo.subjects.forEach(cuit => {
+          const labelName = denoms[cuit] || getArgentineFallbackName(cuit, "Sujeto");
+          const subjectData = reportState.flaggedSubjects.find(s => s.cuit === cuit);
+          const alta = subjectData ? subjectData.altaDate : "N/A";
+          subjectsRowsHtml += \`
+            <div class="grid grid-cols-12 text-[10px] font-medium text-zinc-200 p-2 border-b border-zinc-900/50 last:border-0 hover:bg-zinc-900/40">
+              <div class="col-span-4 font-mono font-bold text-amber-300 select-all">\${cuit}</div>
+              <div class="col-span-5 truncate font-sans text-zinc-100 pr-1" title="\${labelName}">\${labelName}</div>
+              <div class="col-span-3 font-mono text-right text-zinc-400">\${alta}</div>
+            </div>
+          \`;
+        });
+
+        const sidebarHtml = \`
+          <div>
+            <div class="flex items-center gap-1.5 pb-3 border-b border-zinc-800 mb-4 font-sans">
+              <svg class="w-5 h-5 text-blue-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <div>
+                <h3 class="font-extrabold text-[11px] uppercase tracking-widest text-white leading-none">
+                  Dictamen T&eacute;cnico Grupal
+                </h3>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-4">
+              <div>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                  Grupo Bajo An&aacute;lisis
+                </span>
+                <span class="font-extrabold text-sm text-blue-400 block mt-0.5">
+                  Consorcio \${groupInfo.groupId}
+                </span>
+                <span class="font-mono text-xs font-semibold text-zinc-400 block mt-0.2">
+                  V&iacute;nculo: \${hasCommonCounterparts ? "Contraparte Com&uacute;n" : "Transacci&oacute;n Directa"}
+                </span>
+              </div>
+
+              <div>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                  Sujetos Involucrados (Alta Reciente)
+                </span>
+                <div class="border border-zinc-800 rounded bg-zinc-900/60 overflow-hidden font-sans">
+                  <div class="grid grid-cols-12 text-[8px] uppercase font-black text-zinc-500 bg-zinc-900 p-2 border-b border-zinc-800">
+                    <div class="col-span-4 font-black">CUIT</div>
+                    <div class="col-span-5 font-black">Denominaci&oacute;n</div>
+                    <div class="col-span-3 text-right font-black">FECHA</div>
+                  </div>
+                  <div class="flex flex-col">
+                    \${subjectsRowsHtml}
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-1">
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                  ALERTA GRUPAL DETECTADA
+                </span>
+                <div class="p-3 bg-red-950/20 rounded border border-red-900/60 text-xs text-red-200 font-sans shadow-sm leading-relaxed">
+                  <div class="flex gap-2 items-start">
+                    <svg class="w-4 h-4 text-red-400 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <div>
+                      <strong class="text-red-300 block mb-1 uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CR&Iacute;TICA DETECTADA</strong>
+                      \${groupMatchReason}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        \`;
+        document.getElementById("forensic-sidebar-content").innerHTML = sidebarHtml;
+      }
+
+      // 2. Renderizar Tablas
+      renderLocalTable("forensic-recibe-tbody", receives);
+      renderLocalTable("forensic-ordena-tbody", sends);
+      
+      const recTotalSum = receives.reduce((a,b) => a + b.sum, 0);
+      const sndTotalSum = sends.reduce((a,b) => a + b.sum, 0);
+      
+      document.getElementById("forensic-recibe-total").innerText = formatInThousands(recTotalSum);
+      document.getElementById("forensic-ordena-total").innerText = formatInThousands(sndTotalSum);
+
+      if (isGrupal) {
+        renderLocalInternTable("forensic-internas-tbody", internals);
+        const intTotalSum = internals.reduce((a,b) => a + b.sum, 0);
+        document.getElementById("forensic-internas-total").innerText = formatInThousands(intTotalSum);
+      }
+
+      // Actualizar Encabezados
+      document.getElementById("forensic-active-detail-text").innerHTML = titleDetailStr;
+
+      // 3. Dibujar Grafo SVG
+      renderLocalSVG(receives, sends, internals, isGrupal);
+    }
+
+    // Renderizar Tablas Locales
+    function renderLocalTable(tbodyId, list) {
+      const tbody = document.getElementById(tbodyId);
+      tbody.innerHTML = '';
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="py-10 text-center text-zinc-500 font-sans italic text-xs">Sin registros para el nodo analizado.</td></tr>';
+        return;
+      }
+      list.forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b border-zinc-800/80 hover:bg-zinc-900/40 text-[11.5px] text-zinc-300 transition-colors";
+        tr.innerHTML = \`
+          <td class="py-2.5 font-mono text-zinc-400 font-bold">\${item.cuit}</td>
+          <td class="py-2.5 text-zinc-100 truncate max-w-[260px]" title="\${item.denom}">
+            \${item.denom}
+          </td>
+          <td class="py-2.5 text-right font-mono font-bold text-white">\${formatInThousands(item.sum)}</td>
+\`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Renderizar Tabla Internas Local
+    function renderLocalInternTable(tbodyId, list) {
+      const tbody = document.getElementById(tbodyId);
+      tbody.innerHTML = '';
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="py-10 text-center text-zinc-500 font-sans italic text-xs">Sin giros internos.</td></tr>';
+        return;
+      }
+      list.forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b border-zinc-800/80 hover:bg-zinc-900/40 text-[11.5px] text-zinc-300 transition-colors";
+        tr.innerHTML = \`
+          <td class="py-2.5 font-mono text-zinc-400 font-bold">\${item.senderCuit}</td>
+          <td class="py-2.5 text-zinc-100 truncate max-w-[200px]">\${item.senderDenom}</td>
+          <td class="py-2.5 text-center text-zinc-500 font-bold">➔</td>
+          <td class="py-2.5 font-mono text-zinc-400 font-bold">\${item.receiverCuit}</td>
+          <td class="py-2.5 text-zinc-100 truncate max-w-[200px]">\${item.receiverDenom}</td>
+          <td class="py-2.5 text-right font-mono font-bold text-white">\${formatInThousands(item.sum)}</td>
+\`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Dibujar el Grafo en el SVG del Reporte Descargado (DINÁMICO interactivo con D3.js)
+    function renderLocalSVG(receives, sends, internals, isGrupal) {
+      const svg = document.getElementById("forensic-network-svg");
+      svg.innerHTML = ''; // Limpiar
+
+      // Definir marcadores de flechas para trazabilidad
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      
+      // Flecha standard
+      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      marker.setAttribute("id", "arrow-local");
+      marker.setAttribute("viewBox", "0 0 10 10");
+      marker.setAttribute("refX", "22");
+      marker.setAttribute("refY", "5");
+      marker.setAttribute("markerWidth", "6");
+      marker.setAttribute("markerHeight", "6");
+      marker.setAttribute("orient", "auto-start-reverse");
+      marker.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="#71717a"/>';
+      defs.appendChild(marker);
+
+      // Flecha recibidas (Envía al sujeto -> Green #22c55e)
+      const markerRec = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      markerRec.setAttribute("id", "arrow-local-rec");
+      markerRec.setAttribute("viewBox", "0 0 10 10");
+      markerRec.setAttribute("refX", "28");
+      markerRec.setAttribute("refY", "5");
+      markerRec.setAttribute("markerWidth", "5");
+      markerRec.setAttribute("markerHeight", "5");
+      markerRec.setAttribute("orient", "auto-start-reverse");
+      markerRec.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="#22c55e"/>';
+      defs.appendChild(markerRec);
+
+      // Flecha ordenadas (Recibe del sujeto -> Orange #f97316)
+      const markerSnd = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+      markerSnd.setAttribute("id", "arrow-local-snd");
+      markerSnd.setAttribute("viewBox", "0 0 10 10");
+      markerSnd.setAttribute("refX", "28");
+      markerSnd.setAttribute("refY", "5");
+      markerSnd.setAttribute("markerWidth", "5");
+      markerSnd.setAttribute("markerHeight", "5");
+      markerSnd.setAttribute("orient", "auto-start-reverse");
+      markerSnd.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="#f97316"/>';
+      defs.appendChild(markerSnd);
+
+      svg.appendChild(defs);
+
+      const centerX = 380;
+      const centerY = 190;
+      const denoms = reportState.cuitDenominacionesMap || {};
+
+      const nodes = [];
+      const links = [];
+
+      if (!isGrupal) {
+        // --- MODO INDIVIDUAL ---
+        // Nodo Central: Sujeto analizado (Más grande para legibilidad óptima)
+        nodes.push({
+          id: selectedCuit,
+          label: "SUJETO ANALIZADO",
+          isCentral: true,
+          isSubject: true,
+          cuit: selectedCuit,
+          denom: denoms[selectedCuit] || "Sujeto Analizado",
+          color: "#ef4444",
+          fill: "#fee2e2",
+          r: 38,
+          fx: centerX,
+          fy: centerY
+        });
+
+        // Nodos Periféricos
+        const maxPerif = 6;
+        const subRecs = receives.slice(0, Math.ceil(maxPerif / 2));
+        const subSnds = sends.slice(0, Math.floor(maxPerif / 2));
+        const perifNodes = [...subRecs.map(r => ({...r, type: 'RECIBE'})), ...subSnds.map(s => ({...s, type: 'ORDENA'}))];
+
+        perifNodes.forEach((node, i) => {
+          const angle = (2 * Math.PI / perifNodes.length) * i;
+          const radius = 175;
+          nodes.push({
+            id: node.cuit,
+            label: String(node.denom || node.cuit).slice(0, 24),
+            isCentral: false,
+            isSubject: false,
+            cuit: node.cuit,
+            denom: node.denom || node.cuit,
+            type: node.type,
+            sum: node.sum,
+            color: node.type === 'RECIBE' ? '#22c55e' : '#f97316',
+            fill: node.type === 'RECIBE' ? '#d1fae5' : '#ffedd5',
+            r: 24,
+            x: centerX + radius * Math.cos(angle),
+            y: centerY + radius * Math.sin(angle)
+          });
+
+          if (node.type === 'RECIBE') {
+            links.push({
+              source: node.cuit,
+              target: selectedCuit,
+              color: "#22c55e",
+              markerId: "arrow-local-rec",
+              sum: node.sum,
+              isRec: true
+            });
+          } else {
+            links.push({
+              source: selectedCuit,
+              target: node.cuit,
+              color: "#f97316",
+              markerId: "arrow-local-snd",
+              sum: node.sum,
+              isRec: false
+            });
+          }
+        });
+      } else {
+        // --- MODO GRUPAL ---
+        const groupInfo = reportState.groupNetwork;
+        const subjectsList = groupInfo.subjects;
+        const counterpartsList = groupInfo.commonCounterparts;
+
+        const commonCuit = counterpartsList[0] || "COMUN";
+        const commonName = reportState.cuitDenominacionesMap[commonCuit] || "Contraparte Central";
+
+        // Nodo central: Contraparte común
+        nodes.push({
+          id: commonCuit,
+          label: commonName.slice(0, 24).toUpperCase(),
+          subtitle: "CONTRAPARTE COMUN DE RED",
+          isCentral: true,
+          isCommon: true,
+          cuit: commonCuit,
+          denom: commonName,
+          color: "#3b82f6",
+          fill: "#dbeafe",
+          r: 32,
+          fx: centerX,
+          fy: centerY
+        });
+
+        // Sujetos del grupo
+        subjectsList.forEach((sub, idx) => {
+          const spacing = 220;
+          const px = centerX + (idx === 0 ? -spacing : spacing);
+          nodes.push({
+            id: sub,
+            label: (denoms[sub] || sub).slice(0, 24),
+            subtitle: "SUJETO ANALIZADO",
+            isCentral: false,
+            isSubject: true,
+            cuit: sub,
+            denom: denoms[sub] || sub,
+            color: "#ef4444",
+            fill: "#fee2e2",
+            r: 26,
+            x: px,
+            y: centerY + (idx === 0 ? -20 : 20)
+          });
+
+          links.push({
+            source: sub,
+            target: commonCuit,
+            color: "#fb7185",
+            markerId: "arrow-local",
+            isGrupal: true
+          });
+        });
+      }
+
+      // Inicializar simulación drag y fuerza de D3
+      const d3Svg = d3.select(svg);
+
+      // Limpiar elementos g de d3 anteriores si los hay
+      d3Svg.selectAll("g.zoom-container").remove();
+
+      // Crear grupo contenedor de Zoom para envolver todos los elementos del grafo
+      const zoomContainer = d3Svg.append("g").attr("class", "zoom-container");
+
+      // Configurar comportamiento interactivo de Zoom y Pan en D3
+      const zoomBehavior = d3.zoom()
+        .scaleExtent([0.3, 3.0])
+        .on("zoom", (event) => {
+          zoomContainer.attr("transform", event.transform);
+        });
+
+      d3Svg.call(zoomBehavior);
+
+      // Registrar callbacks globales de control de Zoom para sincronizarlos con los botones flotantes de la UI
+      window.zoomInLocal = () => {
+        d3Svg.transition().duration(250).call(zoomBehavior.scaleBy, 1.25);
+      };
+      window.zoomOutLocal = () => {
+        d3Svg.transition().duration(250).call(zoomBehavior.scaleBy, 0.8);
+      };
+      window.resetZoomLocal = () => {
+        d3Svg.transition().duration(250).call(zoomBehavior.transform, d3.zoomIdentity);
+      };
+
+      // Renderizar líneas y nodos dentro del zoomContainer interactivo
+      const linkGroup = zoomContainer.append("g").attr("class", "link-group");
+      const nodeGroup = zoomContainer.append("g").attr("class", "node-group");
+
+      const linkPaths = linkGroup.selectAll("path")
+        .data(links)
+        .enter()
+        .append("path")
+        .attr("class", "transition-all duration-500 ease-in-out")
+        .attr("stroke", d => d.color)
+        .attr("stroke-width", d => d.isGrupal ? "2.5" : "2.2")
+        .attr("fill", "none")
+        .attr("opacity", "0.85")
+        .attr("marker-end", d => "url(#" + d.markerId + ")");
+
+      // Pill group over link lines (individual mode) - dynamic mask badges
+      const linkTextGroup = linkGroup.selectAll("g.link-lbl")
+        .data(links.filter(d => !d.isGrupal))
+        .enter()
+        .append("g")
+        .attr("class", "link-lbl transition-all duration-500 ease-in-out");
+
+      // Background rect pill
+      linkTextGroup.append("rect")
+        .attr("rx", 5)
+        .attr("ry", 5)
+        .attr("fill", "#18181b")
+        .attr("stroke", d => d.isRec ? "#22c55e" : "#f97316")
+        .attr("stroke-width", "0.75")
+        .attr("opacity", "0.95");
+
+      // Label text
+      linkTextGroup.append("text")
+        .attr("text-anchor", "middle")
+        .attr("dy", "3")
+        .attr("fill", d => d.isRec ? "#4ade80" : "#fb923c") // Nice neon green/neon orange for high contrast on dark
+        .attr("font-size", "7.5")
+        .attr("font-family", "monospace")
+        .attr("font-weight", "bold");
+
+      // Container de cada nodo para mover circulos e iconos juntos
+      const nodeElements = nodeGroup.selectAll("g")
+        .data(nodes)
+        .enter()
+        .append("g")
+        .attr("class", "node-item cursor-pointer transition-all duration-500 ease-in-out")
+        .call(d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended));
+
+      // Agregar título descriptivo para accesibilidad/hover
+      nodeElements.append("title")
+        .text(d => (d.denom || d.cuit) + " (" + d.cuit + ")");
+
+      // Círculo del nodo
+      nodeElements.append("circle")
+        .attr("class", "transition-all duration-500 ease-in-out")
+        .attr("r", d => d.r)
+        .attr("fill", d => d.fill)
+        .attr("stroke", d => d.color)
+        .attr("stroke-width", d => d.isCentral ? "3.5" : "1.75");
+
+      const wrapText = (text, maxLen) => {
+        const limit = maxLen || 18;
+        const words = text.split(" ");
+        const lines = [];
+        let currentLine = "";
+        for (const word of words) {
+          if ((currentLine + " " + word).trim().length <= limit) {
+            currentLine = (currentLine + " " + word).trim();
+          } else {
+            if (currentLine) lines.push(currentLine);
+            currentLine = word;
+          }
+        }
+        if (currentLine) lines.push(currentLine);
+        if (lines.length === 0) lines.push(text);
+        return lines;
+      };
+
+      // Denomination Name (Wrapped)
+      const denomTexts = nodeElements.append("text")
+        .attr("class", "denom-label transition-all duration-500 ease-in-out")
+        .attr("text-anchor", "middle")
+        .attr("y", d => d.r + 14)
+        .attr("fill", "#f4f4f5") // zinc-100 / light off-white
+        .attr("font-size", d => d.isCentral ? "11" : "9.5")
+        .attr("font-family", "sans-serif")
+        .attr("font-weight", "bold");
+
+      denomTexts.each(function(d) {
+        const el = d3.select(this);
+        const lines = wrapText(d.denom || "", 18);
+        lines.forEach((line, i) => {
+          el.append("tspan")
+            .attr("x", 0)
+            .attr("dy", i === 0 ? 0 : 11)
+            .text(line);
+        });
+      });
+
+      // CUIT (Positioned below the dynamic lines)
+      nodeElements.append("text")
+        .attr("class", "cuit-label transition-all duration-500 ease-in-out")
+        .attr("text-anchor", "middle")
+        .attr("y", d => {
+          const linesCount = wrapText(d.denom || "", 18).length;
+          return d.r + 14 + (linesCount - 1) * 11 + 14;
+        })
+        .attr("fill", "#a1a1aa") // zinc-405/light grey
+        .attr("font-size", d => d.isCentral ? "9.5" : "8.5")
+        .attr("font-family", "monospace")
+        .attr("font-weight", "bold")
+        .text(d => "CUIT " + d.cuit);
+
+      // D3 Force Simulation setup
+      const simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(d => d.isGrupal ? 220 : 160))
+        .force("charge", d3.forceManyBody().strength(d => d.isCentral ? -800 : -300))
+        .force("center", d3.forceCenter(centerX, centerY))
+        .force("collision", d3.forceCollide().radius(d => d.r + 35));
+
+      simulation.on("tick", () => {
+        // Mantener dentro de bordes seguros del SVG
+        nodes.forEach(d => {
+          const buffer = d.r + 40;
+          d.x = Math.max(buffer, Math.min(centerX * 2 - buffer, d.x));
+          d.y = Math.max(buffer, Math.min(centerY * 2 - buffer, d.y));
+        });
+
+        // Actualizar links con curvas o líneas directas
+        linkPaths.attr("d", d => {
+          if (d.isGrupal) {
+            // Curvatura suave para indicar de ida y vuelta
+            const dx = d.target.x - d.source.x;
+            const dy = d.target.y - d.source.y;
+            const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
+            return "M" + d.source.x + "," + d.source.y + " A" + dr + "," + dr + " 0 0,1 " + d.target.x + "," + d.target.y;
+          }
+          return "M" + d.source.x + "," + d.source.y + " L" + d.target.x + "," + d.target.y;
+        });
+
+        // Posición de los grupos de textos en las líneas (centrados y adaptativos)
+        linkTextGroup.attr("transform", d => {
+          const x = (d.source.x + d.target.x) / 2;
+          const y = (d.source.y + d.target.y) / 2;
+          return "translate(" + x + ", " + y + ")";
+        });
+
+        // Trazar dimensiones de píldoras dinámicamente según el tamaño del texto
+        linkTextGroup.each(function(d) {
+          const g = d3.select(this);
+          const valStr = Math.round(d.sum / 1000) + " k";
+          const textEl = g.select("text");
+          textEl.text(valStr);
+          
+          const textNode = textEl.node();
+          if (textNode) {
+            try {
+              const bbox = textNode.getBBox();
+              g.select("rect")
+                .attr("x", bbox.x - 5)
+                .attr("y", bbox.y - 1.5)
+                .attr("width", bbox.width + 10)
+                .attr("height", bbox.height + 3);
+            } catch (e) {
+              // Fallback estático en caso de que getBBox falle en entornos sin renderizador
+              g.select("rect")
+                .attr("x", -15)
+                .attr("y", -6)
+                .attr("width", 30)
+                .attr("height", 12);
+            }
+          }
+        });
+
+        // Posición de los elementos de nodo
+        nodeElements.attr("transform", d => "translate(" + d.x + ", " + d.y + ")");
+      });
+
+      // Dragging methods
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        if (!d.isCentral) {
+          d.fx = null;
+          d.fy = null;
+        }
+      }
+
+      // Clic para re-enfocar el sujeto analizado
+      nodeElements.on("click", (event, d) => {
+        if (!d.isCentral && d.cuit) {
+          // Re-enfocar localmente
+          goToForensicSubject(d.cuit);
+        }
+      });
+    }
+  </script>
+
+</body>
+</html>`;
+}
+

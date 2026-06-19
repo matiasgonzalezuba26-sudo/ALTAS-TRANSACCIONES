@@ -1,0 +1,6 @@
+{
+  "name": "Mapeador Analítico de Riesgo Temprano",
+  "description": "Herramienta interactiva para supervisar entes de reciente inscripción.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

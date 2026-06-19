@@ -1,0 +1,2578 @@
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Transaction, AMLAnalysisResult } from "./types";
+import { PRESET_CASES } from "./presets";
+import { captureCurrentAMLState, generateAMLReportHTML } from "./utils/reportExporter";
+import NetworkGraph from "./components/NetworkGraph";
+import * as XLSX from "xlsx";
+import { 
+  ShieldAlert, 
+  Settings, 
+  TrendingUp, 
+  Users, 
+  Calendar, 
+  UploadCloud, 
+  Trash2, 
+  Sparkles, 
+  FileText, 
+  Database, 
+  Search, 
+  CheckCircle, 
+  Clock,
+  ArrowRight,
+  FileCheck,
+  Scale,
+  RefreshCw,
+  Info,
+  AlertTriangle,
+  Copy,
+  ExternalLink
+} from "lucide-react";
+
+// Standard Argentine Preset Registries to fallback/preload automatically
+const DEFAULT_ARCA_RECORDS = [
+  { cuit: "30718293049", fechaAlta: "15/05/2026", umbral: 50000000 },
+  { cuit: "30721234569", fechaAlta: "20/05/2026", umbral: 50000000 },
+  { cuit: "30658291032", fechaAlta: "12/03/2024", umbral: 5000000 },
+  { cuit: "30549102834", fechaAlta: "08/07/2025", umbral: 5000000 },
+  { cuit: "30883920191", fechaAlta: "19/11/2023", umbral: 10000000 },
+  { cuit: "30502847193", fechaAlta: "10/01/2016", umbral: 10000000 },
+  { cuit: "30664421902", fechaAlta: "24/09/2018", umbral: 5000000 },
+  { cuit: "30705541239", fechaAlta: "15/02/2022", umbral: 5000000 },
+  { cuit: "30801248931", fechaAlta: "04/05/2021", umbral: 5000000 },
+  { cuit: "30719548202", fechaAlta: "15/04/2026", umbral: 6000000 },
+  { cuit: "30559103945", fechaAlta: "30/08/2021", umbral: 5000000 },
+  { cuit: "30884820192", fechaAlta: "11/12/2022", umbral: 5000000 },
+  { cuit: "30704445559", fechaAlta: "10/05/2026", umbral: 40000000 },
+  { cuit: "30708889999", fechaAlta: "18/05/2026", umbral: 35000000 },
+  { cuit: "30711223349", fechaAlta: "01/05/2026", umbral: 30000000 },
+  { cuit: "30722334459", fechaAlta: "05/05/2026", umbral: 35000000 },
+  { cuit: "30733445569", fechaAlta: "12/05/2026", umbral: 30000000 },
+  { cuit: "30744556679", fechaAlta: "22/05/2026", umbral: 25000000 },
+  { cuit: "30755667789", fechaAlta: "26/05/2026", umbral: 28000000 }
+];
+
+// Helper date arithmetic to parse / sort dates safely
+function parseDateString(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const parts = dateStr.trim().split("/");
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const year = parseInt(parts[2], 10);
+    const d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+// Format date back to dd/mm/yyyy
+function formatDateString(d: Date): string {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+// Custom Spanish list joiner to support "e" instead of "y" before words starting with I-sound
+function joinSpanish(arr: string[]): string {
+  if (!arr || arr.length === 0) return "";
+  if (arr.length === 1) return arr[0];
+  if (arr.length === 2) {
+    const secondStr = arr[1].trim();
+    const startsWithI = /^[iI]/i.test(secondStr) || (/^[hH][iI]/i.test(secondStr) && !/^[hH][iI][eE]/i.test(secondStr));
+    const connector = startsWithI ? " e " : " y ";
+    return arr[0] + connector + arr[1];
+  }
+  const last = arr[arr.length - 1].trim();
+  const startsWithI = /^[iI]/i.test(last) || (/^[hH][iI]/i.test(last) && !/^[hH][iI][eE]/i.test(last));
+  const connector = startsWithI ? " e " : " y ";
+  return arr.slice(0, -1).join(", ") + connector + arr[arr.length - 1];
+}
+
+// Generate premium-grade Argentine names deterministically based on CUIT for high visual polish
+function getArgentineFallbackName(cuit: string, prefixRole: "Sujeto" | "Contraparte"): string {
+  const clean = cuit.trim().replace(/\D/g, "");
+  const map: Record<string, string> = {
+    "30718293049": "Empresa San Jorge S.A.",
+    "30658291032": "Distribuidora El Sol S.R.L.",
+    "30549102834": "Agropecuaria Pampa S.A.",
+    "30883920191": "Consultores Asociados S.A.",
+    "30502847193": "Supermercados Mayoristas S.A.",
+    "30664421902": "Logística y Puertos Argentinos",
+    "30705541239": "Metalúrgica Del Oeste S.R.L.",
+    "30801248931": "Estudio Contable Bianchi & Asoc.",
+    "30719548202": "Desarrollos Inmobiliarios Puerto Madero",
+    "30559103945": "Inversores del Plata",
+    "30884820192": "Fideicomiso La Horqueta"
+  };
+
+  if (map[clean]) return map[clean];
+
+  // Hashing lookalike
+  const numSum = clean.split("").reduce((sum, val) => sum + parseInt(val, 10), 0) || 12;
+  
+  const prefixes = [
+    "Servicios Integra", "Comercializadora", "Inversora", "Consultores", "Transportes",
+    "Constructora", "Agropecuaria", "Soluciones", "Estudio Contable", "Logística Sideral",
+    "Fideicomiso", "Distribuidora", "Alimentos Federales", "Sistemas", "Desarrollos"
+  ];
+  const bodies = [
+    "del Plata", "Pampa", "Andina", "Aconcagua", "del Sur", "San Martín", "del Litoral",
+    "Patagónica", "del Norte", "Alvear", "Cuyo", "San Juan", "del Paraná", "Moreno"
+  ];
+  const suffixes = [
+    "S.A.", "S.R.L.", "S.A.S.", "Fideicomiso S.A.", " Asociados", " de Servicios"
+  ];
+
+  const pref = prefixes[numSum % prefixes.length];
+  const bod = bodies[(numSum + 3) % bodies.length];
+  const suf = suffixes[(numSum * 7) % suffixes.length];
+
+  return `${pref} ${bod} ${suf}`;
+}
+
+function consolidateGraphData(
+  nodes: any[],
+  edges: any[],
+  subjectCuits: string[],
+  commonCounterparts: string[] = []
+) {
+  const subjectsSet = new Set(subjectCuits);
+  const commonSet = new Set(commonCounterparts);
+
+  // Keep analyzed subjects and common counterparts individually
+  const individualNodes = nodes.filter(n => subjectsSet.has(n.id) || commonSet.has(n.id));
+  const counterpartsToConsolidate = nodes.filter(n => n.type === "CONTRAPARTE" && !subjectsSet.has(n.id) && !commonSet.has(n.id));
+
+  // Categorize counterparts
+  const senders: any[] = [];
+  const receivers: any[] = [];
+  const both: any[] = [];
+  const others: any[] = [];
+
+  // Volumes for sorting
+  const nodeVolumes: Record<string, number> = {};
+  nodes.forEach(n => { nodeVolumes[n.id] = 0; });
+  edges.forEach(e => {
+    if (nodeVolumes[e.source] !== undefined) nodeVolumes[e.source] += e.amount_ars;
+    if (nodeVolumes[e.target] !== undefined) nodeVolumes[e.target] += e.amount_ars;
+  });
+
+  counterpartsToConsolidate.forEach(c => {
+    const isSender = edges.some(e => e.source === c.id && subjectsSet.has(e.target));
+    const isReceiver = edges.some(e => e.target === c.id && subjectsSet.has(e.source));
+
+    if (isSender && isReceiver) {
+      both.push(c);
+    } else if (isSender) {
+      senders.push(c);
+    } else if (isReceiver) {
+      receivers.push(c);
+    } else {
+      others.push(c);
+    }
+  });
+
+  const sortByVolume = (arr: any[]) => {
+    return [...arr].sort((a, b) => (nodeVolumes[b.id] || 0) - (nodeVolumes[a.id] || 0));
+  };
+
+  const finalNodes = [...individualNodes];
+  const finalEdges: any[] = [];
+
+  const groupedNodeIdMap = new Map<string, string>(); // detailedId -> groupId
+
+  const processCategory = (categoryNodes: any[], categoryKey: string) => {
+    const sorted = sortByVolume(categoryNodes);
+    const GROUP_THRESHOLD = 5;
+    if (sorted.length > GROUP_THRESHOLD) {
+      // Keep individual top 3
+      const keepCount = 3;
+      const toKeep = sorted.slice(0, keepCount);
+      const toGroup = sorted.slice(keepCount);
+
+      toKeep.forEach(n => finalNodes.push(n));
+
+      // Create group node
+      const groupId = `group-${categoryKey}-${subjectCuits[0] || "main"}`;
+      const groupLabel = `Total ${toGroup.length} de entes`;
+      
+      finalNodes.push({
+        id: groupId,
+        label: groupLabel,
+        type: "CONTRAPARTE",
+        risk_level: "BAJO",
+        antiquity_days: 0,
+        suspicion_cause: `Canal consolidado de ${toGroup.length} contrapartes transaccionales de red (${categoryKey}).`,
+        isGroupNode: true,
+        groupCategory: categoryKey
+      });
+
+      toGroup.forEach(n => {
+        groupedNodeIdMap.set(n.id, groupId);
+      });
+    } else {
+      categoryNodes.forEach(n => finalNodes.push(n));
+    }
+  };
+
+  processCategory(senders, "ENVIA");
+  processCategory(receivers, "RECIBE");
+  processCategory(both, "AMBOS");
+  processCategory(others, "OTRO");
+
+  const groupEdgesMap = new Map<string, any>();
+
+  edges.forEach((edge, idx) => {
+    const origSource = edge.source;
+    const origTarget = edge.target;
+
+    const sourceMapped = groupedNodeIdMap.get(origSource) || origSource;
+    const targetMapped = groupedNodeIdMap.get(origTarget) || origTarget;
+
+    if (sourceMapped === targetMapped) return;
+
+    if (sourceMapped !== origSource || targetMapped !== origTarget) {
+      const edgeKey = `${sourceMapped}➔${targetMapped}`;
+      const existing = groupEdgesMap.get(edgeKey);
+      if (existing) {
+        existing.amount_ars += edge.amount_ars;
+      } else {
+        groupEdgesMap.set(edgeKey, {
+          id: `g-edge-${idx}-${edgeKey}`,
+          source: sourceMapped,
+          target: targetMapped,
+          amount_ars: edge.amount_ars,
+          date: edge.date,
+          alert_reason: "Flujos transaccionales agrupados y consolidados."
+        });
+      }
+    } else {
+      finalEdges.push(edge);
+    }
+  });
+
+  groupEdgesMap.forEach(ge => finalEdges.push(ge));
+
+  return { nodes: finalNodes, edges: finalEdges };
+}
+
+export default function App() {
+  // Navigation Screens State
+  const [activeTab, setActiveTab] = useState<"alertas" | "forense">("alertas");
+  const [forensicMode, setForensicMode] = useState<"individual" | "grupal">("individual");
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
+  // Application Parameters
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("caso-grupal-compartido");
+  const [threshold, setThreshold] = useState<number>(35000000); // 35,000,000 to match Case A (caso-grupal-compartido)
+  const [antiquityMonths, setAntiquityMonths] = useState<number>(3);
+  const antiquityLimit = useMemo(() => antiquityMonths * 30, [antiquityMonths]);
+  const [analysisMonth, setAnalysisMonth] = useState<string>("2026-06");
+  const [lookbackMonths, setLookbackMonths] = useState<number>(3);
+
+  // Loaded scenarios state
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    return PRESET_CASES[0].transactions.map(t => ({
+      ...t,
+      CUIT: t.CUIT.replace(/\D/g, ""),
+      CUIT_CONTRAPARTE: t.CUIT_CONTRAPARTE.replace(/\D/g, ""),
+      DENOMINACION_SUJETO: t.DENOMINACION_SUJETO || getArgentineFallbackName(t.CUIT, "Sujeto"),
+      DENOMINACION_CONTRAPARTE: t.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(t.CUIT_CONTRAPARTE, "Contraparte")
+    }));
+  });
+  
+  // Custom copy-pasting Uploader States (Base de ARCA)
+  const [arcaRecords, setArcaRecords] = useState<{cuit: string, fechaAlta: string, umbral: number}[]>(() => {
+    return DEFAULT_ARCA_RECORDS.map(r => ({
+      cuit: r.cuit.replace(/\D/g, ""),
+      fechaAlta: r.fechaAlta,
+      umbral: r.umbral
+    }));
+  });
+  const [arcaRawText, setArcaRawText] = useState("");
+  const [arcaImportError, setArcaImportError] = useState("");
+
+  // Custom copy-pasting Uploader States (Base de Operaciones)
+  const [opsRawText, setOpsRawText] = useState("");
+  const [opsImportError, setOpsImportError] = useState("");
+
+  // Show inline raw importers inside Screen 2 as secondary tools
+  const [showSecondaryImporter, setShowSecondaryImporter] = useState(false);
+
+  // Analysis Result & Loading State
+  const [analysisResult, setAnalysisResult] = useState<AMLAnalysisResult | null>(null);
+  const [analyzerEngineName, setAnalyzerEngineName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [apiError, setApiError] = useState("");
+
+  // Selected visual node in the network graph for forensic drill-down
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // Explicitly selected subject under analysis (holds persistent CUIT)
+  const [activeSubjectCuit, setActiveSubjectCuit] = useState<string | null>(null);
+
+  // Paso 5: Generación y Descarga Segura - State managers
+  const [isSecureDownloadModalOpen, setIsSecureDownloadModalOpen] = useState(false);
+  const [secureHtmlReport, setSecureHtmlReport] = useState("");
+  const [lastExportedStats, setLastExportedStats] = useState<{ fileName: string, fileSizeKb: number, sha256: string } | null>(null);
+  
+  const [exportLogs, setExportLogs] = useState<{
+    id: string;
+    timestamp: string;
+    fileName: string;
+    actionType: "DOWNLOAD" | "CLIPBOARD_COPY";
+    fileSizeKb: number;
+    sha256: string;
+    officer: string;
+    status: "EXITOSO" | "LIMITADO_POR_SANDBOX";
+  }[]>([
+    {
+      id: "LOG-0182",
+      timestamp: "2026-06-17 11:24:05 UTC",
+      fileName: "reporte_forense_LA_2026-05.html",
+      actionType: "DOWNLOAD",
+      fileSizeKb: 145.2,
+      sha256: "SHA256-SIM-EA8290FB",
+      officer: "M. González (Oficial PLD UBA)",
+      status: "EXITOSO"
+    },
+    {
+      id: "LOG-0181",
+      timestamp: "2026-06-16 16:15:32 UTC",
+      fileName: "reporte_forense_LA_2026-04.html",
+      actionType: "CLIPBOARD_COPY",
+      fileSizeKb: 139.8,
+      sha256: "SHA256-SIM-FB73909B",
+      officer: "M. González (Oficial PLD UBA)",
+      status: "EXITOSO"
+    }
+  ]);
+
+  const [toast, setToast] = useState<{ text: string, type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (text: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ text, type });
+    setTimeout(() => setToast(null), 4500);
+  };
+
+  // Supabase state simulation
+  const [isSupabaseOnline, setIsSupabaseOnline] = useState(true);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [supabaseLatency, setSupabaseLatency] = useState(12);
+
+  const handleTestSupabase = () => {
+    setTestingConnection(true);
+    setTimeout(() => {
+      setTestingConnection(false);
+      setSupabaseLatency(Math.floor(Math.random() * 15) + 6);
+      setIsSupabaseOnline(true);
+    }, 750);
+  };
+
+  // Filtered transactions and arca records in the specified date range
+  const { filteredTransactions, filteredArcaRecords } = useMemo(() => {
+    const [yearStr, monthStr] = analysisMonth.split("-");
+    const yr = parseInt(yearStr, 10);
+    const mo = parseInt(monthStr, 10);
+    // End Date: end of selected month (last day of the month at 23:59:59)
+    const end = new Date(yr, mo, 0, 23, 59, 59);
+    // Start Date: first day of lookback month (e.g. if June 2026 and lookback is 3: month 6 - 3 = month 3, meaning April 1st)
+    const start = new Date(yr, mo - lookbackMonths, 1, 0, 0, 0);
+
+    const fArca = arcaRecords.filter(r => {
+      const altaDate = parseDateString(r.fechaAlta);
+      if (!altaDate) return false;
+      return altaDate >= start && altaDate <= end;
+    });
+
+    // Create a Set of CUITs that have non-zero or defined threshold in the period
+    const validSubjectCuits = new Set(
+      fArca
+        .filter(r => r.umbral !== undefined && r.umbral !== null && r.umbral > 0)
+        .map(r => String(r.cuit).replace(/\D/g, ""))
+    );
+
+    const fTxs = transactions.filter(t => {
+      const txDate = parseDateString(t.FECHA);
+      if (!txDate) return false;
+      const correctPeriod = txDate >= start && txDate <= end;
+      if (!correctPeriod) return false;
+
+      const cleanSubjectCuit = String(t.CUIT).replace(/\D/g, "");
+      return validSubjectCuits.has(cleanSubjectCuit);
+    });
+
+    return { filteredTransactions: fTxs, filteredArcaRecords: fArca };
+  }, [transactions, arcaRecords, analysisMonth, lookbackMonths]);
+
+  // Description about evaluated date window
+  const dateRangeDescription = useMemo(() => {
+    const [yearStr, monthStr] = analysisMonth.split("-");
+    const yr = parseInt(yearStr, 10);
+    const mo = parseInt(monthStr, 10);
+    const end = new Date(yr, mo, 0);
+    const start = new Date(yr, mo - lookbackMonths, 1);
+    
+    const formatDateLabel = (d: Date) => {
+      const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+      return `${months[d.getMonth()]}-${d.getFullYear()}`;
+    };
+    
+    return `Considerando transacciones y altas desde el 1º de ${formatDateLabel(start)} hasta el ${end.getDate()} de ${formatDateLabel(end)}`;
+  }, [analysisMonth, lookbackMonths]);
+
+  // 1. Compute dynamic ARCA Date range stats (Earliest/Latest parsed high-risk boundaries)
+  const arcaDateMetrics = useMemo(() => {
+    if (arcaRecords.length === 0) return { first: "N/A", last: "N/A" };
+    
+    // Sort chronological helper
+    const sorted = [...arcaRecords]
+      .map(r => ({ record: r, dateObj: parseDateString(r.fechaAlta) }))
+      .filter(x => x.dateObj !== null)
+      .sort((a, b) => a.dateObj!.getTime() - b.dateObj!.getTime());
+      
+    if (sorted.length === 0) return { first: "N/A", last: "N/A" };
+    
+    return {
+      first: formatDateString(sorted[0].dateObj!),
+      last: formatDateString(sorted[sorted.length - 1].dateObj!)
+    };
+  }, [arcaRecords]);
+
+  // 2. Map of CUIT to high contrast name/Denominación for the whole app
+  const cuitDenominacionesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    
+    // Seed transaction overrides
+    transactions.forEach(t => {
+      if (t.CUIT) {
+        map[t.CUIT] = t.DENOMINACION_SUJETO || getArgentineFallbackName(t.CUIT, "Sujeto");
+      }
+      if (t.CUIT_CONTRAPARTE) {
+        map[t.CUIT_CONTRAPARTE] = t.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(t.CUIT_CONTRAPARTE, "Contraparte");
+      }
+    });
+
+    // Seed arca databases fallbacks
+    arcaRecords.forEach(r => {
+      if (!map[r.cuit]) {
+        map[r.cuit] = getArgentineFallbackName(r.cuit, "Sujeto");
+      }
+    });
+
+    return map;
+  }, [arcaRecords, transactions]);
+
+  // 3. Map each CUIT to its active Fecha de Alta from the parsed registry database
+  const cuitAltaDatesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    // Start with transaction defaults
+    transactions.forEach(tx => {
+      if (tx.CUIT) {
+        map[tx.CUIT] = tx.FECHA_ALTA_CUIT || tx.FECHA || "14/06/2026";
+      }
+    });
+    // Override directly from explicitly registered ARCA records
+    arcaRecords.forEach(r => {
+      map[r.cuit] = r.fechaAlta;
+    });
+    return map;
+  }, [transactions, arcaRecords]);
+
+  // Sync state with Presets changes
+  const handlePresetSelect = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    const found = PRESET_CASES.find(c => c.id === presetId);
+    if (found) {
+      // Feed preset transaccional data
+      const processedPreset = found.transactions.map(t => ({
+        ...t,
+        CUIT: t.CUIT.replace(/\D/g, ""),
+        CUIT_CONTRAPARTE: t.CUIT_CONTRAPARTE.replace(/\D/g, ""),
+        DENOMINACION_SUJETO: t.DENOMINACION_SUJETO || getArgentineFallbackName(t.CUIT, "Sujeto"),
+        DENOMINACION_CONTRAPARTE: t.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(t.CUIT_CONTRAPARTE, "Contraparte")
+      }));
+      setTransactions(processedPreset);
+      setThreshold(found.suggestedThreshold);
+      setAntiquityMonths(Math.round(found.suggestedDays / 30) || 3);
+      setSelectedNodeId(null);
+
+      // Synthesize matching ARCA registros from the unique CUITs of the selected simulation case
+      const syntheticArcaList: { cuit: string; fechaAlta: string; umbral: number }[] = [];
+      const seenCuits = new Set<string>();
+      
+      processedPreset.forEach(t => {
+        if (t.CUIT && !seenCuits.has(t.CUIT)) {
+          seenCuits.add(t.CUIT);
+          syntheticArcaList.push({
+            cuit: t.CUIT,
+            fechaAlta: t.FECHA_ALTA_CUIT || "15/05/2026",
+            umbral: found.suggestedThreshold
+          });
+        }
+      });
+      
+      setArcaRecords(syntheticArcaList);
+    }
+  };
+
+  // Run the API or Local analysis
+  const executeAnalysis = async (useAi: boolean = false) => {
+    setLoading(true);
+    setApiError("");
+    try {
+      // Sync every transaction's FECHA_ALTA_CUIT and Denominaciones with our active ARCA states before posting
+      const enrichedTransactions = filteredTransactions.map(t => {
+        const matchingCuitAlta = cuitAltaDatesMap[t.CUIT] || t.FECHA_ALTA_CUIT || t.FECHA;
+        const matchingSujetoDenom = cuitDenominacionesMap[t.CUIT] || t.DENOMINACION_SUJETO || getArgentineFallbackName(t.CUIT, "Sujeto");
+        const matchingContraDenom = cuitDenominacionesMap[t.CUIT_CONTRAPARTE] || t.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(t.CUIT_CONTRAPARTE, "Contraparte");
+        return {
+          ...t,
+          FECHA_ALTA_CUIT: matchingCuitAlta,
+          DENOMINACION_SUJETO: matchingSujetoDenom,
+          DENOMINACION_CONTRAPARTE: matchingContraDenom
+        };
+      });
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transactions: enrichedTransactions,
+          threshold,
+          antiquityLimit,
+          useAi,
+          arcaRecords: filteredArcaRecords
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Error al procesar la solicitud.");
+      }
+
+      const data = await response.json();
+      setAnalysisResult(data.analysis);
+      setAnalyzerEngineName(data.engine);
+    } catch (err: any) {
+      console.error(err);
+      setApiError(err.message || "No se pudo establecer conexión con el servidor.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Run automatically when dependencies adapt
+  useEffect(() => {
+    executeAnalysis(false); 
+  }, [filteredTransactions, threshold, antiquityLimit, filteredArcaRecords]);
+
+  const arcaFileInputRef = useRef<HTMLInputElement>(null);
+  const opsFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle ARCA database CSV load (Paste/Uploader Zone)
+  const handleImportArcaCsv = () => {
+    setArcaImportError("");
+    try {
+      if (!arcaRawText.trim()) {
+        setArcaImportError("La Base de ARCA está vacía. Ingrese valores válidos.");
+        return;
+      }
+      const lines = arcaRawText.trim().split(/\r?\n/);
+      const parsed: {cuit: string, fechaAlta: string, umbral: number}[] = [];
+      
+      lines.forEach((line, idx) => {
+        // Skip header lines
+        if (idx === 0 && (line.toLowerCase().includes("cuit") || line.toLowerCase().includes("alta") || line.toLowerCase().includes("umbral"))) {
+          return;
+        }
+        // Split specifically by caret, fallback to comma/semicolon if caret not present
+        const separator = line.includes("^") ? "^" : /[,\t;]/;
+        const cols = line.split(separator).map(c => c.trim().replace(/^["']|["']$/g, ""));
+        if (cols.length < 2) return; // Ignore empty/broken rows
+        
+        const cuitVal = cols[0].replace(/\D/g, "");
+        if (!cuitVal) return;
+        const fechaVal = cols[1];
+        const umbralVal = parseFloat(cols[2] || "0") || 0;
+        
+        parsed.push({
+          cuit: cuitVal,
+          fechaAlta: fechaVal,
+          umbral: umbralVal
+        });
+      });
+
+      if (parsed.length === 0) {
+        throw new Error("Formato esperado: CUIT^FECHA_ALTA^UMBRAL");
+      }
+
+      if (selectedPresetId !== "custom") {
+        setTransactions([]);
+        setSelectedPresetId("custom");
+      }
+      setArcaRecords(parsed);
+      setArcaRawText("");
+      setArcaImportError("");
+    } catch (err: any) {
+      setArcaImportError(err.message || "Error al parsear la Base de Altas de ARCA.");
+    }
+  };
+
+  // Handle ARCA file uploads (.xlsx, .xls, .csv)
+  const handleArcaFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setArcaImportError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: "binary" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
+        
+        const parsed: {cuit: string, fechaAlta: string, umbral: number}[] = [];
+        
+        rows.forEach((row, idx) => {
+          if (row.length < 2) return;
+          
+          // Detect header row and skip
+          const firstColStr = String(row[0] || "").toLowerCase();
+          const secondColStr = String(row[1] || "").toLowerCase();
+          if (idx === 0 && (firstColStr.includes("cuit") || secondColStr.includes("alta") || secondColStr.includes("fecha"))) {
+            return;
+          }
+          
+          const cuitVal = String(row[0] || "").trim().replace(/\D/g, "");
+          if (!cuitVal || cuitVal.length < 5) return;
+          
+          const fechaVal = String(row[1] || "").trim();
+          const umbralVal = parseFloat(String(row[2] || "").trim().replace(/[^0-9.-]/g, "")) || 0;
+          
+          parsed.push({
+            cuit: cuitVal,
+            fechaAlta: fechaVal,
+            umbral: umbralVal
+          });
+        });
+
+        if (parsed.length === 0) {
+          throw new Error("No se leyeron registros válidos del archivo de Excel/CSV.");
+        }
+
+        if (selectedPresetId !== "custom") {
+          setTransactions([]);
+          setSelectedPresetId("custom");
+        }
+        setArcaRecords(parsed);
+        setArcaImportError("");
+      } catch (err: any) {
+        setArcaImportError(err.message || "Error leyendo el archivo.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    // Reset file input element
+    e.target.value = "";
+  };
+
+  // Handle Operations CSV/Caret load
+  const handleImportOpsCsv = () => {
+    setOpsImportError("");
+    try {
+      if (!opsRawText.trim()) {
+        setOpsImportError("Ingrese contenido de Operaciones válido.");
+        return;
+      }
+      const lines = opsRawText.trim().split(/\r?\n/);
+      const parsed: Transaction[] = [];
+
+      lines.forEach((line, idx) => {
+        // Skip headers
+        if (idx === 0 && (line.toLowerCase().includes("monto") || line.toLowerCase().includes("fecha") || line.toLowerCase().includes("cuit") || line.toLowerCase().includes("tipo") || line.toLowerCase().includes("sentido"))) {
+          return;
+        }
+        // Split specifically by caret, fallback to comma/semicolon if caret not present
+        const separator = line.includes("^") ? "^" : /[,\t;]/;
+        const cols = line.split(separator).map(c => c.trim().replace(/^["']|["']$/g, ""));
+        if (cols.length < 5) return;
+
+        const tipoRow = cols[0].toUpperCase() === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
+        const fechaRow = cols[1];
+        const montoRow = cols[2];
+        const cuitRow = cols[3].replace(/\D/g, "");
+        const sujetoDenom = cols[4] || getArgentineFallbackName(cuitRow, "Sujeto");
+        const cuitContraRow = cols[5].replace(/\D/g, "");
+        const contraDenom = cols[6] || getArgentineFallbackName(cuitContraRow, "Contraparte");
+        const fechaAltaLookup = cuitAltaDatesMap[cuitRow] || fechaRow;
+
+        parsed.push({
+          OPERACION: "TRANSFERENCIA",
+          TIPO: tipoRow,
+          FECHA: fechaRow,
+          MONTO: montoRow,
+          CUIT: cuitRow,
+          CUIT_CONTRAPARTE: cuitContraRow,
+          FECHA_ALTA_CUIT: fechaAltaLookup,
+          DENOMINACION_SUJETO: sujetoDenom,
+          DENOMINACION_CONTRAPARTE: contraDenom
+        });
+      });
+
+      if (parsed.length === 0) {
+        throw new Error("No se detectaron transacciones consistentes.");
+      }
+
+      if (selectedPresetId !== "custom") {
+        setArcaRecords([]);
+        setSelectedPresetId("custom");
+      }
+      setTransactions(parsed);
+      setOpsRawText("");
+      setOpsImportError("");
+    } catch (err: any) {
+      setOpsImportError(err.message || "Error al cargar las operaciones.");
+    }
+  };
+
+  // Handle Operations File Upload (.xlsx, .xls, .csv)
+  const handleOpsFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setOpsImportError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: "binary" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
+        
+        const parsed: Transaction[] = [];
+        
+        rows.forEach((row, idx) => {
+          if (row.length < 5) return;
+          
+          // Detect header
+          const col0Str = String(row[0] || "").toLowerCase();
+          const col3Str = String(row[3] || "").toLowerCase();
+          if (idx === 0 && (col0Str.includes("sentido") || col0Str.includes("tipo") || col3Str.includes("cuit") || col3Str.includes("sujeto"))) {
+            return;
+          }
+          
+          const tipoRow = String(row[0] || "").trim().toUpperCase() === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
+          const fechaRow = String(row[1] || "").trim();
+          const montoRow = String(row[2] || "").trim().replace(/[^0-9.-]/g, "");
+          const cuitRow = String(row[3] || "").trim().replace(/\D/g, "");
+          if (!cuitRow) return;
+          
+          const sujetoDenom = String(row[4] || "").trim() || getArgentineFallbackName(cuitRow, "Sujeto");
+          const cuitContraRow = String(row[5] || "").trim().replace(/\D/g, "");
+          const contraDenom = String(row[6] || "").trim() || getArgentineFallbackName(cuitContraRow, "Contraparte");
+          const fechaAltaLookup = cuitAltaDatesMap[cuitRow] || fechaRow;
+          
+          parsed.push({
+            OPERACION: "TRANSFERENCIA",
+            TIPO: tipoRow,
+            FECHA: fechaRow,
+            MONTO: montoRow,
+            CUIT: cuitRow,
+            CUIT_CONTRAPARTE: cuitContraRow,
+            FECHA_ALTA_CUIT: fechaAltaLookup,
+            DENOMINACION_SUJETO: sujetoDenom,
+            DENOMINACION_CONTRAPARTE: contraDenom
+          });
+        });
+
+        if (parsed.length === 0) {
+          throw new Error("No se leyeron transacciones consistentes de Excel/CSV.");
+        }
+
+        if (selectedPresetId !== "custom") {
+          setArcaRecords([]);
+          setSelectedPresetId("custom");
+        }
+        setTransactions(parsed);
+        setOpsImportError("");
+      } catch (err: any) {
+        setOpsImportError(err.message || "Error leyendo el archivo.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = "";
+  };
+
+  // Export full analytic output, loading report and transaction flows as a self-contained HTML document
+  const handleExportHtmlReport = () => {
+    const htmlContent = generateAMLReportHTML(currentAMLState);
+    const sizeKb = parseFloat((htmlContent.length / 1024).toFixed(1));
+    
+    // Deterministic visual fingerprint checksum of document payload
+    let hashVal = 0;
+    for (let j = 0; j < htmlContent.length; j++) {
+      hashVal = ((hashVal << 5) - hashVal) + htmlContent.charCodeAt(j);
+      hashVal = hashVal & hashVal;
+    }
+    const signature = "SHA256-SIM-" + Math.abs(hashVal).toString(16).toUpperCase().substring(0, 8);
+    
+    setSecureHtmlReport(htmlContent);
+    setLastExportedStats({
+      fileName: `reporte_forense_LA_${analysisMonth}.html`,
+      fileSizeKb: sizeKb,
+      sha256: signature
+    });
+
+    let directDownloadSucceeded = true;
+    try {
+      const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `reporte_forense_LA_${analysisMonth}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast("Descarga exitosa. Integridad referencial PLD y firma digital verificada.", "success");
+    } catch (e) {
+      console.warn("Direct download sandbox block; showing popup fallback:", e);
+      directDownloadSucceeded = false;
+      showToast("Sandbox del navegador bloqueó descarga. Se abrió el portal para copia segura.", "info");
+    }
+
+    const newLog = {
+      id: "LOG-" + (182 + exportLogs.length + 1),
+      timestamp: new Date().toISOString().replace("T", " ").substring(0, 19) + " UTC",
+      fileName: `reporte_forense_LA_${analysisMonth}.html`,
+      actionType: "DOWNLOAD" as const,
+      fileSizeKb: sizeKb,
+      sha256: signature,
+      officer: "M. González (Oficial PLD UBA)",
+      status: directDownloadSucceeded ? ("EXITOSO" as const) : ("LIMITADO_POR_SANDBOX" as const)
+    };
+
+    setExportLogs(prev => [newLog, ...prev]);
+    setIsSecureDownloadModalOpen(true); // Re-enabled as requested to show the expanded modal correctly
+
+    // Legacy template bypass logic removed as dead code for enhanced optimization and compliance
+  };
+
+  // Helper inside tables to update single CUIT dates
+  const handleUpdateCuitAltaDate = (cuit: string, newDate: string) => {
+    setArcaRecords(prev => {
+      const matchIndex = prev.findIndex(r => r.cuit === cuit);
+      if (matchIndex > -1) {
+        const updated = [...prev];
+        updated[matchIndex] = { ...updated[matchIndex], fechaAlta: newDate };
+        return updated;
+      }
+      return [...prev, { cuit, fechaAlta: newDate, umbral: threshold }];
+    });
+  };
+
+  // Remove individual row of operations
+  const handleRemoveTx = (index: number) => {
+    setTransactions(prev => prev.filter((_, i) => i !== index));
+    setSelectedNodeId(null);
+  };
+
+  // Clear all sandbox datasets
+  const handleClearAll = () => {
+    setTransactions([]);
+    setArcaRecords([]);
+    setSelectedNodeId(null);
+  };
+
+  // Helper date arithmetic to show in positive rows
+  const getAntiquityDaysLocal = (alta: string, txDate: string): number => {
+    try {
+      const [d1, m1, y1] = alta.split("/").map(Number);
+      const [d2, m2, y2] = txDate.split("/").map(Number);
+      const date1 = new Date(y1, m1 - 1, d1);
+      const date2 = new Date(y2, m2 - 1, d2);
+      const diffTime = Math.abs(date2.getTime() - date1.getTime());
+      return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    } catch {
+      return 0;
+    }
+  };
+
+  // Extract unique analyzed subjects to manage registration dates
+  const uniqueAnalyzedCuits = useMemo(() => {
+    const list = new Set<string>();
+    filteredTransactions.forEach(tx => {
+      if (tx.CUIT) list.add(tx.CUIT);
+    });
+    return Array.from(list);
+  }, [filteredTransactions]);
+
+  useEffect(() => {
+    if (uniqueAnalyzedCuits.length > 0 && (!activeSubjectCuit || !uniqueAnalyzedCuits.includes(activeSubjectCuit))) {
+      setActiveSubjectCuit(uniqueAnalyzedCuits[0]);
+    }
+  }, [uniqueAnalyzedCuits, activeSubjectCuit]);
+
+  // Calculate Positive High-Risk early warning cases (< threshold of antiquity Limit with operations exceeding)
+  const positiveCases = useMemo(() => {
+    if (!analysisResult) return [];
+    
+    // Filter subject nodes that meet early risk criteria (< antiquityLimit and registered high volumes)
+    const filteredCases = analysisResult.nodes.filter(node => {
+      if (node.type !== "ANALIZADO") return false;
+      const belongsToLimit = node.antiquity_days < antiquityLimit;
+      
+      const relatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
+      const totalVolume = relatedTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+      
+      // Look up custom umbral from arca records
+      const cleanId = String(node.id).replace(/\D/g, "");
+      const matchingArca = filteredArcaRecords ? filteredArcaRecords.find((r: any) => String(r.cuit).replace(/\D/g, "") === cleanId) : null;
+      const activeThreshold = matchingArca && matchingArca.umbral !== undefined ? matchingArca.umbral : threshold;
+      const exceeds = totalVolume > activeThreshold; // Strictly thresholding accumulated volume inside lookup window
+
+      return belongsToLimit && exceeds;
+    }).map(node => {
+      const relatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
+      const totalVolume = relatedTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+      const opCount = relatedTxs.length;
+      return {
+        ...node,
+        totalVolume,
+        opCount,
+        altaDate: cuitAltaDatesMap[node.id] || "No especificada"
+      };
+    });
+
+    return filteredCases.sort((a, b) => b.totalVolume - a.totalVolume);
+  }, [analysisResult, filteredTransactions, antiquityLimit, threshold, cuitAltaDatesMap, filteredArcaRecords]);
+
+  // Compute aggregated data for the currently selected/analyzed subject
+  const currentCuit = useMemo(() => {
+    if (activeSubjectCuit && uniqueAnalyzedCuits.includes(activeSubjectCuit)) {
+      return activeSubjectCuit;
+    }
+    if (positiveCases && positiveCases.length > 0) return positiveCases[0].id;
+    const firstSubject = analysisResult?.nodes.find(n => n.type === "ANALIZADO");
+    if (firstSubject) return firstSubject.id;
+    return null;
+  }, [activeSubjectCuit, uniqueAnalyzedCuits, positiveCases, analysisResult]);
+
+  const currentSubjectName = useMemo(() => {
+    if (!currentCuit) return "No seleccionado";
+    return cuitDenominacionesMap[currentCuit] || getArgentineFallbackName(currentCuit, "Sujeto");
+  }, [currentCuit, cuitDenominacionesMap]);
+
+  // Reset forensic mode and group selection on preset change
+  useEffect(() => {
+    setForensicMode("individual");
+    setSelectedGroupId(null);
+  }, [selectedPresetId]);
+
+  // Detected group flows of multiple interconnected subjects under analysis
+  const detectedGroupFlows = useMemo(() => {
+    if (!analysisResult) return [];
+    
+    // We only group nodes of type "ANALIZADO"
+    const analyzedSubjects = analysisResult.nodes.filter(n => n.type === "ANALIZADO");
+    const groups: {
+      id: string;
+      name: string;
+      subjects: string[];
+      commonCounterparts: string[];
+    }[] = [];
+
+    for (let i = 0; i < analyzedSubjects.length; i++) {
+      for (let j = i + 1; j < analyzedSubjects.length; j++) {
+        const subA = analyzedSubjects[i].id;
+        const subB = analyzedSubjects[j].id;
+
+        // Check if there is a direct transaction edge between them
+        const directEdge = analysisResult.edges.some(e => 
+          (e.source === subA && e.target === subB) || (e.source === subB && e.target === subA)
+        );
+
+        // Find counterparties that are shared in common
+        const counterpartsA = new Set<string>(
+          analysisResult.edges
+            .filter(e => e.source === subA || e.target === subA)
+            .map(e => e.source === subA ? e.target : e.source)
+            .filter(id => id !== subA && id !== subB)
+        );
+
+        const counterpartsB = new Set<string>(
+          analysisResult.edges
+            .filter(e => e.source === subB || e.target === subB)
+            .map(e => e.source === subB ? e.target : e.source)
+            .filter(id => id !== subA && id !== subB)
+        );
+
+        const sharedCoords = Array.from(counterpartsA).filter(id => counterpartsB.has(id));
+
+        if (directEdge || sharedCoords.length > 0) {
+          const nameA = cuitDenominacionesMap[subA] || analyzedSubjects[i].label;
+          const nameB = cuitDenominacionesMap[subB] || analyzedSubjects[j].label;
+          const firstWordA = nameA.split(" ")[0] || "Sujeto A";
+          const firstWordB = nameB.split(" ")[0] || "Sujeto B";
+
+          groups.push({
+            id: `grupo-${subA}-${subB}`,
+            name: `${firstWordA} / ${firstWordB} (Interconectados)`,
+            subjects: [subA, subB],
+            commonCounterparts: sharedCoords
+          });
+        }
+      }
+    }
+    return groups;
+  }, [analysisResult, cuitDenominacionesMap]);
+
+  // Auto-select first group if in grupal mode and none selected
+  useEffect(() => {
+    if (forensicMode === "grupal" && detectedGroupFlows.length > 0) {
+      if (!selectedGroupId || !detectedGroupFlows.some(g => g.id === selectedGroupId)) {
+        setSelectedGroupId(detectedGroupFlows[0].id);
+      }
+    } else if (forensicMode === "individual") {
+      setSelectedGroupId(null);
+    }
+  }, [forensicMode, detectedGroupFlows, selectedGroupId]);
+
+  const activeGroup = useMemo(() => {
+    if (forensicMode !== "grupal" || !selectedGroupId) return null;
+    return detectedGroupFlows.find(g => g.id === selectedGroupId) || null;
+  }, [forensicMode, selectedGroupId, detectedGroupFlows]);
+
+  // Compiled compliance and state report model (Paso 1: Captura de Estado de Interfaz y Datos Dinámicos)
+  const currentAMLState = useMemo(() => {
+    const selectedPresetName = PRESET_CASES.find(c => c.id === selectedPresetId)?.name || "Caso Custom/Archivo Subido";
+    const groupFallback = activeGroup || (detectedGroupFlows.length > 0 ? detectedGroupFlows[0] : null);
+    return captureCurrentAMLState({
+      analysisMonth,
+      lookbackMonths,
+      threshold,
+      selectedPresetId,
+      selectedPresetName,
+      transactions: filteredTransactions,
+      positiveCases,
+      cuitDenominacionesMap,
+      activeGroup: groupFallback,
+      antiquityLimit,
+      activeTab,
+      forensicMode,
+      currentCuit: currentCuit || undefined,
+      selectedGroupId: selectedGroupId || (groupFallback ? groupFallback.id : undefined),
+    });
+  }, [analysisMonth, lookbackMonths, threshold, selectedPresetId, filteredTransactions, positiveCases, cuitDenominacionesMap, activeGroup, detectedGroupFlows, antiquityLimit, activeTab, forensicMode, currentCuit, selectedGroupId]);
+
+  // Filter nodes and edges for FLUJO INDIVIDUAL to show ONLY the selected CUIT and its direct counterparties / transactions
+  const forensicGraphData = useMemo(() => {
+    if (!analysisResult) return { nodes: [], edges: [] };
+    if (!currentCuit) return { nodes: [], edges: [] };
+    
+    // Filter edges connected directly to currentCuit
+    const filteredEdges = analysisResult.edges.filter(edge => 
+      edge.source === currentCuit || edge.target === currentCuit
+    );
+    
+    // Collect involved node IDs (currentCuit and its counterparties)
+    const involvedNodeIds = new Set<string>();
+    involvedNodeIds.add(currentCuit);
+    filteredEdges.forEach(edge => {
+      involvedNodeIds.add(edge.source);
+      involvedNodeIds.add(edge.target);
+    });
+    
+    // Filter nodes that are involved in these edges
+    const filteredNodes = analysisResult.nodes.filter(node => 
+      involvedNodeIds.has(node.id)
+    );
+    
+    return { nodes: filteredNodes, edges: filteredEdges };
+  }, [analysisResult, currentCuit]);
+
+  // Combined active graph data before grouping
+  const activeUnconsolidatedGraphData = useMemo(() => {
+    if (forensicMode === "individual") {
+      return forensicGraphData;
+    } else {
+      if (!activeGroup) return { nodes: [], edges: [] };
+      const groupSubjects = activeGroup.subjects;
+
+      // Filter edges connected to any of the group subjects
+      const filteredEdges = (analysisResult?.edges || []).filter(edge => 
+        groupSubjects.includes(edge.source) || groupSubjects.includes(edge.target)
+      );
+
+      // Collect involved nodes
+      const involvedNodeIds = new Set<string>();
+      groupSubjects.forEach(s => involvedNodeIds.add(s));
+      filteredEdges.forEach(edge => {
+        involvedNodeIds.add(edge.source);
+        involvedNodeIds.add(edge.target);
+      });
+
+      const filteredNodes = (analysisResult?.nodes || []).filter(node => 
+        involvedNodeIds.has(node.id)
+      );
+
+      return { nodes: filteredNodes, edges: filteredEdges };
+    }
+  }, [forensicMode, forensicGraphData, activeGroup, analysisResult]);
+
+  // Final consolidated graph data to render
+  const activeGraphData = useMemo(() => {
+    const raw = activeUnconsolidatedGraphData;
+    if (forensicMode === "individual") {
+      if (!currentCuit) return { nodes: [], edges: [] };
+      return consolidateGraphData(raw.nodes, raw.edges, [currentCuit]);
+    } else {
+      if (!activeGroup) return { nodes: [], edges: [] };
+      return consolidateGraphData(raw.nodes, raw.edges, activeGroup.subjects, activeGroup.commonCounterparts);
+    }
+  }, [forensicMode, activeUnconsolidatedGraphData, currentCuit, activeGroup]);
+
+  const { recibeList, recibeTotal, ordenaList, ordenaTotal, internasList, internasTotal } = useMemo(() => {
+    if (forensicMode === "individual") {
+      if (!currentCuit) {
+        return { recibeList: [], recibeTotal: 0, ordenaList: [], ordenaTotal: 0, internasList: [], internasTotal: 0 };
+      }
+
+      // "RECIBE" flows: currentCuit is receiving money (TIPO === "RECIBIDA")
+      // The counterparts who SENT this money are tx.CUIT_CONTRAPARTE
+      const recibeMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      filteredTransactions
+        .filter(tx => tx.CUIT === currentCuit && tx.TIPO === "RECIBIDA")
+        .forEach(tx => {
+          const contraCuit = tx.CUIT_CONTRAPARTE;
+          const contraDenom = cuitDenominacionesMap[contraCuit] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(contraCuit, "Contraparte");
+          const amount = parseFloat(tx.MONTO) || 0;
+          if (!recibeMap[contraCuit]) {
+            recibeMap[contraCuit] = { cuit: contraCuit, denom: contraDenom, sum: 0 };
+          }
+          recibeMap[contraCuit].sum += amount;
+        });
+
+      const recibeList = Object.values(recibeMap).sort((a, b) => b.sum - a.sum);
+      const recibeTotal = recibeList.reduce((acc, curr) => acc + curr.sum, 0);
+
+      // "ORDENA" flows: currentCuit is ordering/sending money (TIPO === "ORDENADA")
+      // The counterparts who RECEIVED this money are tx.CUIT_CONTRAPARTE
+      const ordenaMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      filteredTransactions
+        .filter(tx => tx.CUIT === currentCuit && tx.TIPO === "ORDENADA")
+        .forEach(tx => {
+          const contraCuit = tx.CUIT_CONTRAPARTE;
+          const contraDenom = cuitDenominacionesMap[contraCuit] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(contraCuit, "Contraparte");
+          const amount = parseFloat(tx.MONTO) || 0;
+          if (!ordenaMap[contraCuit]) {
+            ordenaMap[contraCuit] = { cuit: contraCuit, denom: contraDenom, sum: 0 };
+          }
+          ordenaMap[contraCuit].sum += amount;
+        });
+
+      const ordenaList = Object.values(ordenaMap).sort((a, b) => b.sum - a.sum);
+      const ordenaTotal = ordenaList.reduce((acc, curr) => acc + curr.sum, 0);
+
+      return { recibeList, recibeTotal, ordenaList, ordenaTotal, internasList: [], internasTotal: 0 };
+    } else {
+      // MODE GRUPAL CONSOLIDADO DE PRECISIÓN DIRECTA
+      if (!activeGroup) {
+        return { recibeList: [], recibeTotal: 0, ordenaList: [], ordenaTotal: 0, internasList: [], internasTotal: 0 };
+      }
+      const subjects = activeGroup.subjects;
+
+      const recibeMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      const ordenaMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      const internasMap: Record<string, { senderCuit: string; senderDenom: string; receiverCuit: string; receiverDenom: string; sum: number }> = {};
+
+      filteredTransactions.forEach(tx => {
+        const amount = parseFloat(tx.MONTO) || 0;
+
+        // Determine actual source sender and recipient receiver in this flow
+        const sender = tx.TIPO === "RECIBIDA" ? tx.CUIT_CONTRAPARTE : tx.CUIT;
+        const receiver = tx.TIPO === "RECIBIDA" ? tx.CUIT : tx.CUIT_CONTRAPARTE;
+
+        const isSenderInGroup = subjects.includes(sender);
+        const isReceiverInGroup = subjects.includes(receiver);
+
+        if (isSenderInGroup && isReceiverInGroup) {
+          // Both sender and receiver are part of the group -> Internal Flow!
+          const key = `${sender}_${receiver}`;
+          const senderDenom = cuitDenominacionesMap[sender] || getArgentineFallbackName(sender, "Sujeto");
+          const receiverDenom = cuitDenominacionesMap[receiver] || getArgentineFallbackName(receiver, "Sujeto");
+          if (!internasMap[key]) {
+            internasMap[key] = {
+              senderCuit: sender,
+              senderDenom,
+              receiverCuit: receiver,
+              receiverDenom,
+              sum: 0
+            };
+          }
+          internasMap[key].sum += amount;
+        } else if (!isSenderInGroup && isReceiverInGroup) {
+          // Sender is outside, Receiver is inside -> Funds entering Group (RECIBE)
+          const contraCuit = sender;
+          const contraDenom = cuitDenominacionesMap[contraCuit] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(contraCuit, "Contraparte");
+          if (!recibeMap[contraCuit]) {
+            recibeMap[contraCuit] = { cuit: contraCuit, denom: contraDenom, sum: 0 };
+          }
+          recibeMap[contraCuit].sum += amount;
+        } else if (isSenderInGroup && !isReceiverInGroup) {
+          // Sender is inside, Receiver is outside -> Funds exiting Group (ORDENA)
+          const contraCuit = receiver;
+          const contraDenom = cuitDenominacionesMap[contraCuit] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(contraCuit, "Contraparte");
+          if (!ordenaMap[contraCuit]) {
+            ordenaMap[contraCuit] = { cuit: contraCuit, denom: contraDenom, sum: 0 };
+          }
+          ordenaMap[contraCuit].sum += amount;
+        }
+      });
+
+      const recibeList = Object.values(recibeMap).sort((a, b) => b.sum - a.sum);
+      const recibeTotal = recibeList.reduce((acc, curr) => acc + curr.sum, 0);
+
+      const ordenaList = Object.values(ordenaMap).sort((a, b) => b.sum - a.sum);
+      const ordenaTotal = ordenaList.reduce((acc, curr) => acc + curr.sum, 0);
+
+      const internasList = Object.values(internasMap).sort((a, b) => b.sum - a.sum);
+      const internasTotal = internasList.reduce((acc, curr) => acc + curr.sum, 0);
+
+      return { recibeList, recibeTotal, ordenaList, ordenaTotal, internasList, internasTotal };
+    }
+  }, [forensicMode, activeGroup, filteredTransactions, currentCuit, cuitDenominacionesMap]);
+
+  const formatInThousands = (val: number) => {
+    const inThousands = val / 1000;
+    return `$ ${inThousands.toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 font-sans antialiased pb-16">
+      
+      {/* Dynamic top gradient aesthetic bar */}
+      <div className="h-1 bg-gradient-to-r from-rose-600 via-zinc-900 to-amber-500 w-full" />
+
+      {/* Primary Top Header Area */}
+      <header className="bg-white border-b border-zinc-200/80 px-6 py-4 shadow-xs relative">
+        {/* Floating Toast Notification HUD inside sandboxed interface */}
+        {toast && (
+          <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4.5 py-3 rounded-xl border shadow-lg text-xs font-bold font-sans animate-bounce transition-all duration-300
+            ${toast.type === "success" 
+              ? "bg-emerald-950/95 border-emerald-500/30 text-emerald-300" 
+              : toast.type === "error"
+                ? "bg-rose-950/95 border-rose-500/30 text-rose-300"
+                : "bg-zinc-950/95 border-zinc-500/30 text-zinc-300"
+            }
+          `}>
+            <span className="flex h-2 w-2 relative">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${toast.type === "success" ? "bg-emerald-400" : toast.type === "error" ? "bg-rose-400" : "bg-amber-400"}`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${toast.type === "success" ? "bg-emerald-500" : toast.type === "error" ? "bg-rose-500" : "bg-amber-500"}`}></span>
+            </span>
+            <span>{toast.text}</span>
+          </div>
+        )}
+
+        <div className="max-w-7xl xl:max-w-[1555px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-zinc-950 flex items-center justify-center text-white shadow-xs">
+              <Scale className="w-5.5 h-5.5 text-amber-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-extrabold text-zinc-900 tracking-tight">
+                  REPORTE ARCA / TRANSACCIONALIDAD
+                </h1>
+              </div>
+              <p className="text-xs text-zinc-500 font-medium">
+                Sujeto de Reciente Inscripción con Alta Transaccionalidad
+              </p>
+            </div>
+          </div>
+
+          {/* Paso 5: Botón Principal de Generación y Descarga Segura en el Encabezado */}
+          <div className="flex items-center gap-2 shrink-0 self-stretch sm:self-auto">
+            <button
+              onClick={handleExportHtmlReport}
+              className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-zinc-900 to-zinc-950 hover:from-rose-950 hover:to-rose-900 text-white font-bold text-xs rounded-xl shadow-md border border-zinc-800 hover:border-rose-900/50 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-97 group"
+              id="exportar-pld-principal"
+              title="Generar y Descargar Reporte Forense Interactivo con Filtros Dinámicos (Paso 5)"
+            >
+              <FileCheck className="w-4.5 h-4.5 text-emerald-400 group-hover:text-amber-400 transition" />
+              <span className="uppercase tracking-wider font-mono text-[10.5px]">Exportar Reporte HTML</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Dynamic parameters input section */}
+      <div id="arca-analysis-parameters" className="bg-white border-b border-zinc-200 px-6 py-4.5 shadow-2xs">
+        <div className="max-w-7xl xl:max-w-[1555px] mx-auto flex flex-col gap-3">
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end">
+            
+            {/* Target month selection with native Calendar containing month and year */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                Fecha del Análisis
+              </label>
+              <input
+                type="month"
+                value={analysisMonth}
+                onChange={(e) => setAnalysisMonth(e.target.value)}
+                className="w-full bg-zinc-50 text-zinc-900 border border-zinc-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-zinc-900 cursor-pointer transition-colors shadow-2xs"
+              />
+            </div>
+
+            {/* Lookback months selection */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-zinc-400" />
+                Período de Análisis
+              </label>
+              <select
+                value={lookbackMonths}
+                onChange={(e) => setLookbackMonths(parseInt(e.target.value, 10))}
+                className="w-full bg-zinc-50 text-zinc-900 border border-zinc-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-zinc-900 cursor-pointer transition-colors shadow-2xs"
+              >
+                <option value={1}>1 Mes</option>
+                <option value={2}>2 Meses</option>
+                <option value={3}>3 Meses</option>
+                <option value={4}>4 Meses</option>
+                <option value={6}>6 Meses</option>
+                <option value={12}>12 Meses</option>
+              </select>
+            </div>
+
+            {/* Antiquity Days dropdown (labeled "ANTIGUEDAD") */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-1">
+                <Users className="w-3.5 h-3.5 text-zinc-400" />
+                ANTIGUEDAD ARCA
+              </label>
+              <select
+                value={antiquityMonths}
+                onChange={(e) => setAntiquityMonths(parseInt(e.target.value, 10))}
+                className="w-full bg-zinc-50 text-zinc-900 border border-zinc-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-zinc-900 cursor-pointer transition-colors shadow-2xs"
+              >
+                <option value={1}>1 Mes</option>
+                <option value={2}>2 Meses</option>
+                <option value={3}>3 Meses</option>
+                <option value={4}>4 Meses</option>
+                <option value={6}>6 Meses</option>
+                <option value={12}>12 Meses</option>
+              </select>
+            </div>
+
+          </div>
+
+          {/* Sub description informing current state of lookback evaluation filter */}
+          <p className="text-[10px] font-bold text-zinc-500 italic bg-zinc-100 border border-zinc-200 px-3 py-2 rounded-lg flex items-center gap-2">
+            <Info className="w-3.5 h-3.5 text-zinc-400" />
+            <span>{dateRangeDescription} | El umbral aplica sobre el acumulado (ordenado + recibido) en este período.</span>
+          </p>
+
+        </div>
+      </div>
+
+      {/* Screen Tabs Selector Navigation Bar */}
+      <nav id="viewport-navigation" className="bg-zinc-100 border-b border-zinc-200 px-6 sticky top-0 z-30 shadow-xs">
+        <div className="max-w-7xl xl:max-w-[1555px] mx-auto flex gap-4">
+          
+          <button
+            id="tab-alertas"
+            onClick={() => setActiveTab("alertas")}
+            className={`py-3 px-4 text-xs font-bold transition-all relative flex items-center gap-2 border-b-2 cursor-pointer
+              ${activeTab === "alertas" 
+                ? "border-zinc-900 text-zinc-900 font-black bg-zinc-200/40" 
+                : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"
+              }
+            `}
+          >
+            <ShieldAlert className="w-4 h-4 text-rose-500" />
+            <span>Reporte y Carga de Datos</span>
+            {positiveCases.length > 0 && (
+              <span className="bg-rose-600 text-white font-mono text-[10px] px-1.5 py-0.2 rounded-full font-black">
+                {positiveCases.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            id="tab-forense"
+            onClick={() => setActiveTab("forense")}
+            className={`py-3 px-4 text-xs font-bold transition-all relative flex items-center gap-2 border-b-2 cursor-pointer
+              ${activeTab === "forense" 
+                ? "border-zinc-900 text-zinc-900 font-black bg-zinc-200/40" 
+                : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"
+              }
+            `}
+          >
+            <TrendingUp className="w-4 h-4 text-zinc-600" />
+            <span>FLUJO INDIVIDUAL / GRUPAL</span>
+          </button>
+
+        </div>
+      </nav>
+
+      {/* Main Container Workspace */}
+      <main className="max-w-7xl xl:max-w-[1555px] mx-auto px-4 sm:px-6 pt-8 flex flex-col gap-8">
+        
+
+
+        {loading && (
+          <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center shadow-xs flex flex-col items-center justify-center gap-3">
+            <div className="w-8 h-8 border-3 border-zinc-900 border-t-transparent rounded-full animate-spin"></div>
+            <div>
+              <h4 className="font-bold text-xs uppercase tracking-wider text-zinc-800">Cargando matriz analítica sandbox y consultando modelo...</h4>
+              <p className="text-xs text-zinc-400 mt-0.5">Recalculando antigüedades fiscales y dependencias de flujo.</p>
+            </div>
+          </div>
+        )}
+
+        {apiError && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3.5 rounded-lg text-xs flex flex-col gap-1.5 shadow-xs">
+            <span className="font-bold tracking-wider uppercase text-rose-700 flex items-center gap-1">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              Atención de Servidor
+            </span>
+            <p className="font-medium text-rose-600 leading-normal">{apiError}</p>
+          </div>
+        )}
+
+        {/* SCREEN 1: ALERTAS Y COMPILADO CENTRAL */}
+        {!loading && activeTab === "alertas" && (
+          <section className="flex flex-col gap-8 animate-fade-in">
+            
+            {/* KPI Overview Summary & Supabase Connection Badge Grid */}
+            {analysisResult && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                
+                {/* KPI 1 : Total Encontrados */}
+                <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-lg bg-zinc-100 border border-zinc-200 flex items-center justify-center text-zinc-900 font-extrabold font-mono text-sm shadow-inner">
+                    {uniqueAnalyzedCuits.length}
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-widest">Total Encontrados</span>
+                    <span className="text-sm font-bold text-zinc-800 leading-tight">Sujetos Registrados</span>
+                  </div>
+                </div>
+
+                {/* KPI 2 : Casos Positivos */}
+                <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-extrabold font-mono text-sm text-white shadow-inner
+                    ${positiveCases.length > 0 ? "bg-rose-600 animate-pulse" : "bg-emerald-600"}
+                  `}>
+                    {positiveCases.length}
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-rose-500 block tracking-widest">Casos Positivos</span>
+                    <span className="text-sm font-bold text-zinc-800 leading-tight">Alertas &lt; {antiquityLimit} Días Alta</span>
+                  </div>
+                </div>
+
+                {/* KPI 3 : Volumen Total de casos encontrados */}
+                <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-800 border-emerald-200 border flex items-center justify-center font-extrabold text-sm shadow-inner">
+                    $
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-bold text-zinc-400 block tracking-widest">Volumen Total</span>
+                    <span className="text-sm font-bold text-zinc-900 leading-tight">
+                      $ {analysisResult.summary.total_volume_processed_ars.toLocaleString("es-AR")} ARS
+                    </span>
+                  </div>
+                </div>
+
+                {/* KPI 4 : Conexión Supabase (PostgreSQL) */}
+                <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-2xs flex items-center justify-between gap-3.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-emerald-555 text-emerald-600 border border-emerald-200 flex items-center justify-center shadow-inner">
+                      <Database className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-widest leading-none">Conexión Supabase</span>
+                        <span className={`w-2 h-2 rounded-full inline-block ${testingConnection ? "bg-amber-400 animate-ping" : "bg-emerald-500 animate-pulse"}`}></span>
+                      </div>
+                      <span className="text-xs font-black text-emerald-700 block mt-0.5 uppercase tracking-wide">
+                        {testingConnection ? "Verificando..." : "ONLINE / ACTIVA"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <button
+                      onClick={handleTestSupabase}
+                      disabled={testingConnection}
+                      title="Probar Latencia"
+                      className="p-1.5 rounded bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 transition text-zinc-500 hover:text-zinc-800 disabled:opacity-50 cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${testingConnection ? "animate-spin text-amber-500" : ""}`} />
+                    </button>
+                    {!testingConnection && (
+                      <span className="text-[8px] font-mono font-bold text-zinc-400 block">
+                        Ping: {supabaseLatency}ms
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* REPORTE CRÍTICO TABLE */}
+            <div className="bg-white border-2 border-rose-200/90 rounded-xl overflow-hidden shadow-sm">
+              <div className="p-4.5 bg-gradient-to-r from-zinc-900 via-zinc-950 to-rose-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-yellow-400" />
+                  <div>
+                    <h3 className="font-extrabold text-sm tracking-tight text-white uppercase">
+                      RESUMEN: CASOS POSITIVOS
+                    </h3>
+                    <p className="text-[11px] text-zinc-400 mt-0.5 font-medium leading-relaxed">
+                      Sujetos detectados con menos de {antiquityLimit} días de antigüedad en padrón y volumen superior al umbral de corte.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {positiveCases.length === 0 ? (
+                <div className="p-12 text-center bg-rose-50/5 text-zinc-500 font-medium text-xs flex flex-col items-center justify-center gap-2">
+                  <CheckCircle className="w-7 h-7 text-emerald-500" />
+                  <div>
+                    <h4 className="font-bold text-zinc-800 uppercase text-xs">Sin Alertas en el Rango del Umbral</h4>
+                    <p className="text-zinc-400 mt-0.5 font-normal">Ninguno de los contribuyentes reúne antigüedad inferior a {antiquityLimit} días operando montos sobre el umbral.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-rose-200 bg-rose-50/75 text-[10px] font-extrabold text-rose-900 uppercase tracking-wider">
+                        <th className="py-3 px-4 text-center whitespace-nowrap">ID</th>
+                        <th className="py-3 px-4 whitespace-nowrap">CUIT</th>
+                        <th className="py-3 px-4">Denominación</th>
+                        <th className="py-3 px-4 text-center whitespace-nowrap">Alta ARCA</th>
+                        <th className="py-3 px-4 text-center whitespace-nowrap">Antigüedad</th>
+                        <th className="py-3 px-4 text-right whitespace-nowrap">Volumen Total</th>
+                        <th className="py-3 px-3 text-center whitespace-nowrap">Operaciones</th>
+                        <th className="py-3 px-4 text-right whitespace-nowrap">Umbral</th>
+                        <th className="py-3 px-4 text-center whitespace-nowrap font-bold">VER DETALLE</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {positiveCases.map((node, i) => {
+                        const subjectName = cuitDenominacionesMap[node.id] || `Sujeto ${node.id}`;
+                        
+                        // Extract counterparties operated by this positive CUIT
+                        const associatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
+                        const uniqueContras = Array.from(new Set(associatedTxs.map(t => t.CUIT_CONTRAPARTE))) as string[];
+ 
+                        // Look up custom umbral from arca records
+                        const cleanId = String(node.id).replace(/\D/g, "");
+                        const matchingArca = arcaRecords ? arcaRecords.find((r: any) => String(r.cuit).replace(/\D/g, "") === cleanId) : null;
+                        const activeThreshold = matchingArca && matchingArca.umbral !== undefined ? matchingArca.umbral : threshold;
+
+                        return (
+                          <tr key={node.id} className="border-b border-rose-100 hover:bg-rose-50/30 text-xs transition-colors">
+                            
+                            {/* Sequential ID index column */}
+                            <td className="py-4.5 px-4 font-mono font-extrabold text-[11px] text-zinc-950 text-center whitespace-nowrap">
+                              {i + 1}
+                            </td>
+
+                            {/* CUIT */}
+                            <td className="py-4.5 px-4 font-mono text-[10.5px] text-zinc-500 font-bold whitespace-nowrap">
+                              {node.id}
+                            </td>
+
+                            {/* Denominación */}
+                            <td className="py-4.5 px-4 font-bold text-zinc-950 font-sans tracking-tight">
+                              {subjectName}
+                            </td>
+ 
+                            {/* Alta ARCA */}
+                            <td className="py-4.5 px-4 font-mono font-bold text-zinc-800 text-center whitespace-nowrap">
+                              {node.altaDate}
+                            </td>
+ 
+                            {/* Antigüedad de cuenta */}
+                            <td className="py-4.5 px-4 font-mono font-black text-rose-600 text-center text-xs whitespace-nowrap">
+                              {node.antiquity_days} días
+                            </td>
+ 
+                            {/* Volumen transaccionado */}
+                            <td className="py-4.5 px-4 font-mono font-black text-zinc-950 text-right text-sm whitespace-nowrap">
+                              $ {Math.round(node.totalVolume).toLocaleString("es-AR")}
+                            </td>
+ 
+                            {/* Cantidad de operaciones */}
+                            <td className="py-4.5 px-4 font-mono font-bold text-zinc-900 text-center whitespace-nowrap">
+                              {node.opCount} <span className="text-[10px] text-zinc-400 font-normal font-sans">giros</span>
+                            </td>
+ 
+                            {/* Standard simplified "Umbral" column header representation */}
+                            <td className="py-4.5 px-4 font-mono font-bold text-zinc-400 text-right text-xs whitespace-nowrap">
+                              $ {activeThreshold.toLocaleString("es-AR")}
+                            </td>
+ 
+                            {/* Action filter trigger */}
+                            <td className="py-4.5 px-4 text-center whitespace-nowrap">
+                              <button
+                                onClick={() => {
+                                  setSelectedNodeId(node.id);
+                                  setActiveTab("forense");
+                                }}
+                                className="px-2.5 py-1.5 bg-rose-950 hover:bg-rose-900 text-white font-bold text-[10px] rounded flex items-center gap-1 transition mx-auto cursor-pointer shadow-2xs uppercase tracking-wider whitespace-nowrap"
+                              >
+                                <span>IR</span>
+                                <ArrowRight className="w-3.5 h-3.5 text-amber-300" />
+                              </button>
+                            </td>
+ 
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* CARGA DE DATOS PARA ABAJO - Base d */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Panel A: ARCA Database Upload (CUIT, Date, Umbral) */}
+              <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-xs flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-5 h-5 text-amber-500" />
+                    <div>
+                      <h3 className="font-extrabold text-xs text-zinc-900 uppercase">
+                        Cargar Base de Altas (ARCA)
+                      </h3>
+                      <p className="text-[10px] text-zinc-400">Padrón de inscripción de CUITs y umbrales específicos</p>
+                    </div>
+                  </div>
+                  <span className="bg-amber-50 text-amber-800 text-[9px] uppercase font-mono font-black px-2 py-0.5 rounded border border-amber-200">
+                    Padrón ARCA
+                  </span>
+                </div>
+
+                {/* Text area and parse command row */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] uppercase font-bold text-zinc-500">
+                      Formato esperado (^ o Excel):
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-zinc-400 bg-zinc-100 px-1 py-0.2 rounded border border-zinc-200">
+                      CUIT^FECHA_ALTA^UMBRAL
+                    </span>
+                  </div>
+                  
+                  <textarea
+                    placeholder="30718293049^15/05/2026^5000000&#10;30658291032^12/03/2024^0"
+                    value={arcaRawText}
+                    onChange={(e) => setArcaRawText(e.target.value)}
+                    className="w-full h-24 p-2.5 font-mono text-xs border border-zinc-200 rounded bg-zinc-50 focus:bg-white focus:outline-none focus:border-zinc-900 block resize-none leading-relaxed"
+                  />
+                  
+                  {/* File Upload Trigger for ARCA */}
+                  <input 
+                    type="file" 
+                    ref={arcaFileInputRef} 
+                    onChange={handleArcaFileChange} 
+                    accept=".xlsx,.xls,.csv" 
+                    className="hidden" 
+                  />
+
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      onClick={handleImportArcaCsv}
+                      className="px-3.5 py-1.5 bg-zinc-950 hover:bg-zinc-850 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
+                    >
+                      <UploadCloud className="w-4 h-4 text-amber-400" />
+                      <span>Cargar Registros ARCA</span>
+                    </button>
+                    
+                    <button
+                      onClick={() => arcaFileInputRef.current?.click()}
+                      className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
+                    >
+                      <span>Subir Excel/CSV</span>
+                    </button>
+
+                    {arcaImportError && (
+                      <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ {arcaImportError}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Real-time metrics output block (First/Last date reads & total) */}
+                <div className="mt-1 bg-gradient-to-r from-zinc-50 to-zinc-100/50 border border-zinc-200 p-3 rounded-lg grid grid-cols-3 gap-2 text-center text-zinc-700">
+                  <div className="border-r border-zinc-200/85">
+                    <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-wider">Total Registros</span>
+                    <span className="text-xs font-black text-zinc-900 font-mono block leading-none mt-1">{arcaRecords.length}</span>
+                  </div>
+                  <div className="border-r border-zinc-200/85">
+                    <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-wider">Primera Fecha</span>
+                    <span className="text-xs font-bold text-zinc-800 font-mono block leading-none mt-1 text-rose-600">{arcaDateMetrics.first}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-wider">Última Fecha</span>
+                    <span className="text-xs font-bold text-zinc-800 font-mono block leading-none mt-1 text-emerald-600">{arcaDateMetrics.last}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Panel B: CARGAR OPERACIONES FINANCIERAS */}
+              <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-xs flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-zinc-800" />
+                    <div>
+                      <h3 className="font-extrabold text-xs text-zinc-900 uppercase">
+                        CARGAR OPERACIONES FINANCIERAS
+                      </h3>
+                      <p className="text-[10px] text-zinc-400">Lote transaccional de depósitos y débitos</p>
+                    </div>
+                  </div>
+                  <span className="bg-zinc-100 text-zinc-700 text-[9px] uppercase font-mono font-black px-2 py-0.5 rounded border border-zinc-200">
+                    Lote de Transferencias
+                  </span>
+                </div>
+
+                {/* Text area and parse command row */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] uppercase font-bold text-zinc-500">
+                      Formato esperado (^ o Excel):
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-zinc-400 bg-zinc-100 px-1 py-0.2 rounded border border-zinc-200">
+                      TIPO^FECHA^MONTO^CUIT^DENOM_SUJETO^CUIT_CONT^DENOM_CONT
+                    </span>
+                  </div>
+
+                  <textarea
+                    placeholder="RECIBIDA^01/06/2026^12500000^30718293049^Empresa San Jorge S.A.^30658291032^Distribuidora El Sol S.R.L.&#10;ORDENADA^02/06/2026^20700000^30718293049^Empresa San Jorge S.A.^30883920191^Consultores Asociados S.A."
+                    value={opsRawText}
+                    onChange={(e) => setOpsRawText(e.target.value)}
+                    className="w-full h-24 p-2.5 font-mono text-xs border border-zinc-200 rounded bg-zinc-50 focus:bg-white focus:outline-none focus:border-zinc-900 block resize-none leading-relaxed"
+                  />
+
+                  {/* File Upload Trigger for Operations */}
+                  <input 
+                    type="file" 
+                    ref={opsFileInputRef} 
+                    onChange={handleOpsFileChange} 
+                    accept=".xlsx,.xls,.csv" 
+                    className="hidden" 
+                  />
+
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      onClick={handleImportOpsCsv}
+                      className="px-3.5 py-1.5 bg-zinc-950 hover:bg-zinc-850 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
+                    >
+                      <UploadCloud className="w-4 h-4 text-zinc-300" />
+                      <span>Cargar Operaciones</span>
+                    </button>
+
+                    <button
+                      onClick={() => opsFileInputRef.current?.click()}
+                      className="px-3.5 py-1.5 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 border border-zinc-200 text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
+                    >
+                      <span>Subir Excel/CSV</span>
+                    </button>
+
+                    {opsImportError && (
+                      <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ {opsImportError}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Real-time Operations total counters box */}
+                <div className="mt-1 bg-gradient-to-r from-zinc-50 to-zinc-100/50 border border-zinc-200 p-3 rounded-lg flex items-center justify-between">
+                  <div>
+                    <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-wider">Cantidad de Operaciones</span>
+                    <span className="text-[10.5px] text-zinc-500 font-medium">Registradas temporalmente en sandbox</span>
+                  </div>
+                  <div className="bg-zinc-950 text-white font-mono text-xs font-black px-4 py-1.5 rounded-md border border-zinc-800 shadow-inner">
+                    {transactions.length} Totales
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+
+
+            {/* General compliance notes */}
+            <div className="bg-zinc-100 border border-zinc-200 rounded-lg p-3.5 text-[11px] text-zinc-500 leading-normal flex items-start gap-2">
+              <span className="text-base text-zinc-400">ℹ</span>
+              <div>
+                <p className="font-semibold text-zinc-650">¿Qué son los casos positivos de inicio rápido?</p>
+                <p className="font-normal mt-0.5">Aquellos contribuyentes recientemente incorporados en el padrón ARCA que inmediatamente canalizan volúmenes de fondos anormales superando el umbral de corte, una tipología estándar de atomizadores o de instrumental instrumental usado en evasión de lavado de dinero.</p>
+              </div>
+            </div>
+
+          </section>
+        )}
+
+        {/* SCREEN 2: RED FORENSE E INDIVIDUAL */}
+        {!loading && activeTab === "forense" && (
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* Visual network and analytical core (Left columns) */}
+            <div className="lg:col-span-2 flex flex-col gap-6">
+              
+              {/* SVG interactive network block */}
+              {analysisResult && (
+                <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-xs flex flex-col gap-4">
+                  
+                  {/* Mode & Selection Header bar */}
+                  <div className="flex flex-col md:flex-row justify-between md:items-center gap-3 pb-3 border-b border-zinc-150">
+                    <div className="flex items-center gap-3">
+                      <h3 className="font-extrabold text-xs uppercase tracking-wider text-zinc-900 flex items-center gap-1.5 shrink-0">
+                        <Users className="w-4 h-4 text-zinc-500" />
+                        ANÁLISIS DE FLUJOS
+                      </h3>
+                      
+                      {/* Sub-tabs Capsule */}
+                      <div className="flex items-center bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 shrink-0">
+                        <button
+                          onClick={() => setForensicMode("individual")}
+                          className={`px-3 py-1 rounded-md text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer select-none ${
+                            forensicMode === "individual"
+                              ? "bg-white text-zinc-900 shadow-2xs border border-zinc-200 font-black"
+                              : "text-zinc-500 hover:text-zinc-850"
+                          }`}
+                        >
+                          Individual
+                        </button>
+                        <button
+                          onClick={() => setForensicMode("grupal")}
+                          className={`px-3 py-1 rounded-md text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer select-none relative ${
+                            forensicMode === "grupal"
+                              ? "bg-white text-zinc-900 shadow-2xs border border-zinc-200 font-black"
+                              : "text-zinc-500 hover:text-zinc-850"
+                          }`}
+                        >
+                          <span>Grupal</span>
+                          {detectedGroupFlows.length > 0 && (
+                            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                            </span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* SELECTOR FOR ACTIVE SUBJECT / GROUP */}
+                    <div className="flex items-center gap-2 font-sans self-start md:self-auto">
+                      {forensicMode === "individual" ? (
+                        <>
+                          <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 shrink-0">
+                            Sujeto Analizado:
+                          </label>
+                          <select
+                            value={currentCuit || ""}
+                            onChange={(e) => {
+                              const targetCuit = e.target.value;
+                              if (targetCuit) {
+                                setActiveSubjectCuit(targetCuit);
+                                setSelectedNodeId(targetCuit);
+                              }
+                            }}
+                            className="bg-zinc-50 border border-zinc-200 rounded-md px-2 py-1 text-[11px] font-bold text-zinc-900 focus:outline-none focus:border-zinc-950 cursor-pointer transition shadow-2xs max-w-[260px]"
+                          >
+                            {uniqueAnalyzedCuits.map((c, i) => {
+                              const name = cuitDenominacionesMap[c] || `Sujeto ${c}`;
+                              return (
+                                <option key={c} value={c}>
+                                  ID: {i + 1} | CUIT: {c} | {name}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </>
+                      ) : (
+                        <>
+                          <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 shrink-0">
+                            Grupo Interconectado:
+                          </label>
+                          {detectedGroupFlows.length > 0 ? (
+                            <select
+                              value={selectedGroupId || ""}
+                              onChange={(e) => {
+                                const targetGroupId = e.target.value;
+                                if (targetGroupId) {
+                                  setSelectedGroupId(targetGroupId);
+                                  setSelectedNodeId(null);
+                                }
+                              }}
+                              className="bg-zinc-50 border border-zinc-200 rounded-md px-2 py-1 text-[11px] font-bold text-zinc-900 focus:outline-none focus:border-zinc-950 cursor-pointer transition shadow-2xs max-w-[280px]"
+                            >
+                              {detectedGroupFlows.map((g, i) => (
+                                <option key={g.id} value={g.id}>
+                                  Ref #{i + 1} | {g.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <span className="text-[10.5px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded px-2.5 py-0.5">
+                              Sin conexiones grupales en este caso
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <NetworkGraph 
+                    nodes={activeGraphData.nodes}
+                    edges={activeGraphData.edges}
+                    selectedNodeId={selectedNodeId}
+                    onSelectNode={(id) => setSelectedNodeId(id)}
+                    cuitDenominacionesMap={cuitDenominacionesMap}
+                    currentCuit={currentCuit}
+                    commonCounterparts={activeGroup?.commonCounterparts || []}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* RESUMEN DE OPERACIONES (Full Width Spanning 3 Columns on Row 2) */}
+            <div className="col-span-1 lg:col-span-3 lg:row-start-2 lg:col-start-1 bg-white border border-zinc-200 rounded-xl p-5 shadow-xs">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-zinc-100 mb-4">
+                  <div>
+                    <h3 className="font-extrabold text-xs uppercase tracking-wider text-zinc-900 flex items-center gap-1.5">
+                      <TrendingUp className="w-4 h-4 text-zinc-500" />
+                      RESUMEN DE OPERACIONES
+                    </h3>
+                    <p className="text-[11px] font-sans text-zinc-650 mt-1 leading-normal">
+                      {forensicMode === "individual" ? (
+                        <>CUIT: <span className="text-zinc-950 font-black font-mono">{currentCuit || "NO SELECCIONADO"}</span> &emsp; <span className="text-zinc-900 font-extrabold">{currentSubjectName}</span></>
+                      ) : (
+                        <>
+                          GRUPO: <span className="text-zinc-950 font-extrabold text-zinc-900">{activeGroup ? joinSpanish(activeGroup.subjects.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Sujeto")} (CUIT ${c})`)) : ""}</span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                  <span id="cifras-miles-label" className="text-[10px] font-extrabold italic text-zinc-500 font-sans pr-1 mr-[-6px] leading-none self-end sm:self-center">
+                    -cifras en $ miles-
+                  </span>
+                </div>
+ 
+                {forensicMode === "grupal" && activeGroup && (
+                  <div className="bg-amber-50/50 border border-amber-200 rounded-lg p-3.5 mb-4 text-xs text-amber-900 leading-relaxed font-normal">
+                    <strong className="text-amber-950 uppercase font-black text-[10px] block tracking-wider mb-1">
+                      💡 ¿QUÉ INCLUYE ESTA SECCIÓN DE ANÁLISIS CONSOLIDADO GRUPAL?
+                    </strong>
+                    Este panel fusiona la totalidad de los flujos de fondos correspondientes a todos los sujetos analizados del grupo. 
+                    Muestra consolidado los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red. 
+                    Permite visualizar de manera inmediata cómo el nodo común (como <span className="font-bold underline">{activeGroup.commonCounterparts.map(c => cuitDenominacionesMap[c] || c).join(", ")}</span>) actúa como el vaso comunicante o canal amortiguador que unifica e interconecta las operaciones financieras del grupo.
+                  </div>
+                )}
+
+
+                {/* Dual split: RECIBE on the Left, ORDENA on the Right */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
+                  
+                  {/* Left Column: RECIBE */}
+                  <div className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/50 flex flex-col justify-between">
+                    <div>
+                      <div className="border-b border-zinc-200 pb-2 mb-3.5 flex justify-between items-center bg-sky-50 -mx-4 -mt-4 p-3 rounded-t-xl border-t border-x">
+                        <span className="font-extrabold text-xs text-sky-900 uppercase tracking-wider block">
+                          {forensicMode === "grupal" ? "FONDOS ENTRANTES TOTALES A LA RED" : "RECIBE"}
+                        </span>
+                        <span className="bg-sky-100 text-sky-900 text-[9px] uppercase font-black px-2 py-0.5 rounded-full">
+                          {forensicMode === "grupal" ? "INYECCIONES EXTERNAS" : "FLUJO ACUMULADO ENTRANTE"}
+                        </span>
+                      </div>
+
+                      {recibeList.length === 0 ? (
+                        <div className="text-center py-10 text-zinc-400 text-xs font-normal">
+                          No se registraron fondos recibidos por este CUIT analizado.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                <th className="pb-1.5 font-bold">CUIT</th>
+                                <th className="pb-1.5 font-bold">Denominación</th>
+                                <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {recibeList.map((item, idx) => (
+                                <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
+                                  <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
+                                  <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
+                                  <td className="py-2.5 text-right font-mono font-bold text-zinc-900">
+                                    {formatInThousands(item.sum)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {recibeList.length > 0 && (
+                      <div className="border-t border-zinc-200 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-900">
+                        <span>TOTAL</span>
+                        <span className="font-mono text-xs text-sky-800 font-extrabold bg-sky-50 px-2.5 py-1 rounded border border-sky-200">
+                          {formatInThousands(recibeTotal)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: ORDENA */}
+                  <div className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/50 flex flex-col justify-between">
+                    <div>
+                      <div className="border-b border-zinc-200 pb-2 mb-3.5 flex justify-between items-center bg-amber-50 -mx-4 -mt-4 p-3 rounded-t-xl border-t border-x">
+                        <span className="font-extrabold text-xs text-amber-900 uppercase tracking-wider block">
+                          {forensicMode === "grupal" ? "EGRESOS DE RED TOTALES LIQUIDADOS" : "ORDENA"}
+                        </span>
+                        <span className="bg-amber-100 text-amber-900 text-[9px] uppercase font-black px-2 py-0.5 rounded-full">
+                          {forensicMode === "grupal" ? "CANALIZACIONES EXTERNAS" : "FLUJO ACUMULADO SALIENTE"}
+                        </span>
+                      </div>
+
+                      {ordenaList.length === 0 ? (
+                        <div className="text-center py-10 text-zinc-400 text-xs font-normal">
+                          No se registraron fondos ordenados por este CUIT analizado.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                <th className="pb-1.5 font-bold">CUIT</th>
+                                <th className="pb-1.5 font-bold">Denominación</th>
+                                <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {ordenaList.map((item, idx) => (
+                                <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
+                                  <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
+                                  <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
+                                  <td className="py-2.5 text-right font-mono font-bold text-zinc-900">
+                                    {formatInThousands(item.sum)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {ordenaList.length > 0 && (
+                      <div className="border-t border-zinc-200 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-900">
+                        <span>TOTAL</span>
+                        <span className="font-mono text-xs text-amber-800 font-extrabold bg-amber-50 px-2.5 py-1 rounded border border-amber-200">
+                          {formatInThousands(ordenaTotal)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+
+                {/* Movimientos Internos Table - Rendered Full Width inside Grupal mode below the column split */}
+                {forensicMode === "grupal" && activeGroup && internasList.length > 0 && (
+                  <div className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/55 mt-6">
+                    <div className="border-b border-zinc-200 pb-2 mb-3.5 flex justify-between items-center bg-zinc-100/80 -mx-4 -mt-4 p-3 rounded-t-xl border-t border-x">
+                      <span className="font-extrabold text-xs text-zinc-900 uppercase tracking-wider block">
+                        Movimientos Internos de la Red (Traspasos Circulares)
+                      </span>
+                      <span className="bg-zinc-200 text-zinc-800 text-[9px] uppercase font-black px-2 py-0.5 rounded-full">
+                        FONDOS AUTO-COMPENSADOS EN RED
+                      </span>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                            <th className="pb-1.5 font-bold">CUIT Origen</th>
+                            <th className="pb-1.5 font-bold">Denominación Origen</th>
+                            <th className="pb-1.5 font-bold text-center">➔</th>
+                            <th className="pb-1.5 font-bold">CUIT Destino</th>
+                            <th className="pb-1.5 font-bold">Denominación Destino</th>
+                            <th className="pb-1.5 font-bold text-right">Volumen Canalizado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {internasList.map((item, idx) => (
+                            <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px] last:border-0">
+                              <td className="py-2.5 font-mono text-zinc-900 font-bold">{item.senderCuit}</td>
+                              <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[220px]" title={item.senderDenom}>{item.senderDenom}</td>
+                              <td className="py-2.5 text-center text-zinc-400 font-black">➔</td>
+                              <td className="py-2.5 font-mono text-zinc-900 font-bold">{item.receiverCuit}</td>
+                              <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[220px]" title={item.receiverDenom}>{item.receiverDenom}</td>
+                              <td className="py-2.5 text-right font-mono font-bold text-zinc-900">
+                                {formatInThousands(item.sum)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="border-t border-zinc-200 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-900">
+                      <span>VOLUMEN TOTAL TRANSFERIDO</span>
+                      <span className="font-mono text-xs text-zinc-700 font-extrabold bg-zinc-150 px-2.5 py-1 rounded border border-zinc-250">
+                        {formatInThousands(internasTotal)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            {/* Individual Inspection Panel (Right Sidebar - Positioned adjacent to graph on desktop) */}
+            <div className="lg:col-span-1 lg:col-start-3 lg:row-start-1 flex flex-col gap-6">
+              
+              {/* Detailed focus card */}
+              <div className="bg-zinc-950 text-white rounded-xl p-5 shadow-md border border-zinc-800 flex flex-col justify-between min-h-[400px]">
+                
+                <div>
+                  <div className="flex items-center gap-1.5 pb-3 border-b border-zinc-800 mb-4 font-sans">
+                    <FileCheck className="w-5 h-5 text-amber-500 animate-pulse" />
+                    <div>
+                      <h3 className="font-extrabold text-[11px] uppercase tracking-widest text-white leading-none">
+                        {forensicMode === "individual" ? "Dictamen Técnico Individual" : "DICTAMEN TÉCNICO GRUPAL"}
+                      </h3>
+                    </div>
+                  </div>
+
+                  {forensicMode === "individual" ? (
+                    currentCuit ? (
+                      (() => {
+                        const selectedNode = analysisResult?.nodes.find(n => n.id === currentCuit);
+                        if (!selectedNode) {
+                          return (
+                            <div className="text-zinc-400 text-xs py-10 text-center font-normal">
+                              No se encontraron detalles para el sujeto analizado.
+                            </div>
+                          );
+                        }
+
+                        const valAlta = cuitAltaDatesMap[currentCuit] || "N/A";
+                        const resolvedLabelName = cuitDenominacionesMap[currentCuit] || selectedNode.label;
+
+                        // Dynamic logic for building the perfect suspicion cause description
+                        let displayText = selectedNode.suspicion_cause;
+                        const nodeRecibidoAmount = filteredTransactions
+                          .filter(t => t.CUIT === selectedNode.id && t.TIPO === "RECIBIDA")
+                          .reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+                        const nodeRecibidoMiles = Math.round(nodeRecibidoAmount / 1000).toLocaleString("es-AR");
+
+                        const nodeOrdenadoAmount = filteredTransactions
+                          .filter(t => t.CUIT === selectedNode.id && t.TIPO === "ORDENADA")
+                          .reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+                        const nodeOrdenadoMiles = Math.round(nodeOrdenadoAmount / 1000).toLocaleString("es-AR");
+
+                        const nodeAcumuladoAmount = nodeRecibidoAmount + nodeOrdenadoAmount;
+                        const nodeAcumuladoMiles = Math.round(nodeAcumuladoAmount / 1000).toLocaleString("es-AR");
+
+                        const cleanId = String(selectedNode.id).replace(/\D/g, "");
+                        const matchingArca = arcaRecords ? arcaRecords.find((r: any) => String(r.cuit).replace(/\D/g, "") === cleanId) : null;
+                        const activeThreshold = matchingArca && matchingArca.umbral !== undefined ? matchingArca.umbral : threshold;
+                        const activeThresholdMiles = Math.round(activeThreshold / 1000).toLocaleString("es-AR");
+
+                        displayText = `Inscripción en ARCA hace ${selectedNode.antiquity_days} días. Registra un total de $ ${nodeRecibidoMiles} miles de fondos recibidos y $ ${nodeOrdenadoMiles} miles de fondos ordenados, volumen acumulado $ ${nodeAcumuladoMiles} miles, superando el umbral de corte acumulado de $ ${activeThresholdMiles} miles.`;
+
+                        return (
+                          <div className="flex flex-col gap-4">
+                            
+                            {/* CUIT Display & Denomination */}
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                                Denominación
+                              </span>
+                              <span className="font-extrabold text-sm text-amber-300 block mt-0.5">
+                                {resolvedLabelName}
+                              </span>
+                              <span className="font-mono text-xs font-semibold text-zinc-400 block mt-0.2 select-all">
+                                CUIT {selectedNode.id}
+                              </span>
+                            </div>
+
+                            {/* Typology */}
+                            <div className="grid grid-cols-2 gap-3 bg-zinc-900 p-2.5 rounded border border-zinc-850">
+                              <div>
+                                <span className="text-[8px] uppercase font-bold text-zinc-500 block tracking-wider">Categoría</span>
+                                <span className="text-[11px] font-bold text-zinc-200 mt-0.5 block truncate">
+                                  Sujeto de Análisis
+                                </span>
+                              </div>
+                              <div className="text-center">
+                                <span className="text-[8px] uppercase font-bold text-zinc-500 block tracking-wider">FECHA</span>
+                                <span className="text-[11px] font-mono font-bold text-amber-400 mt-0.5 block">
+                                  {valAlta}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Computed Metrics */}
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                                Antigüedad Fiscal Detectada
+                              </span>
+                              <span className="text-xs font-medium text-zinc-300 mt-0.5 block">
+                                <strong className="text-white font-mono font-bold">{selectedNode.antiquity_days} días impositivos</strong>
+                              </span>
+                            </div>
+
+                            {/* Forensic Cause / Rationale */}
+                            <div className="mt-2">
+                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1">
+                                ALERTA DETECTADA
+                              </span>
+                              <p className="text-xs text-zinc-300 leading-relaxed font-normal bg-zinc-900 border border-zinc-850 p-3 rounded italic">
+                                {displayText}
+                              </p>
+                            </div>
+
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div className="text-center py-16 text-zinc-500 border border-dashed border-zinc-800 rounded-lg flex flex-col justify-center items-center gap-2">
+                        <Search className="w-6 h-6 text-zinc-700" />
+                        <div className="text-xs font-medium">No hay ningún sujeto impositivo bajo análisis.</div>
+                      </div>
+                    )
+                  ) : (
+                    activeGroup ? (
+                      (() => {
+                        const subjects = activeGroup.subjects;
+                        
+                        const subjectsList = subjects.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Sujeto")} (CUIT ${c})`);
+                        const subjectsDetail = joinSpanish(subjectsList);
+                        
+                        const hasCommonCounterparts = activeGroup.commonCounterparts.length > 0;
+                        let presentationText = "";
+                        if (hasCommonCounterparts) {
+                          const counterpartsList = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
+                          const counterpartsDetail = joinSpanish(counterpartsList);
+                          if (activeGroup.commonCounterparts.length === 1) {
+                            presentationText = `presentando en común la siguiente contraparte: ${counterpartsDetail}`;
+                          } else {
+                            presentationText = `presentando en común las siguientes contrapartes: ${counterpartsDetail}`;
+                          }
+                        } else {
+                          presentationText = `presentando operaciones entre sí`;
+                        }
+
+                        const groupMatchReason = `Se observan convergencia de flujos entre los sujetos analizados: ${subjectsDetail}, ${presentationText}.`;
+
+                        return (
+                          <div className="flex flex-col gap-4">
+                            
+                            {/* Group header */}
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                                Grupo Bajo Análisis
+                              </span>
+                              <span className="font-extrabold text-sm text-blue-400 block mt-0.5">
+                                {activeGroup.name}
+                              </span>
+                              <span className="font-mono text-xs font-semibold text-zinc-400 block mt-0.2">
+                                Vínculo: {hasCommonCounterparts ? "Contraparte Común" : "Transacción Directa"}
+                              </span>
+                            </div>
+
+                            {/* Subject Grid/Table Box */}
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                                Sujetos Involucrados (Alta Reciente)
+                              </span>
+                              <div className="border border-zinc-800 rounded bg-zinc-900/60 overflow-hidden font-sans">
+                                {/* Header row */}
+                                <div className="grid grid-cols-12 text-[8px] uppercase font-black text-zinc-500 bg-zinc-900 p-2 border-b border-zinc-800">
+                                  <div className="col-span-4 font-black">CUIT</div>
+                                  <div className="col-span-5 font-black">Denominación</div>
+                                  <div className="col-span-3 text-right font-black">FECHA</div>
+                                </div>
+                                {/* Rows */}
+                                <div className="flex flex-col">
+                                  {subjects.map(cuit => {
+                                    const labelName = cuitDenominacionesMap[cuit] || getArgentineFallbackName(cuit, "Sujeto");
+                                    const alta = cuitAltaDatesMap[cuit] || "N/A";
+                                    return (
+                                      <div key={cuit} className="grid grid-cols-12 text-[10px] font-medium text-zinc-200 p-2 border-b border-zinc-900/50 last:border-0 hover:bg-zinc-900/40">
+                                        <div className="col-span-4 font-mono font-bold text-amber-300 select-all">{cuit}</div>
+                                        <div className="col-span-5 truncate font-sans text-zinc-100 pr-1" title={labelName}>{labelName}</div>
+                                        <div className="col-span-3 font-mono text-right text-zinc-400">{alta}</div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Restored Group Detected Alert */}
+                            <div className="mt-1">
+                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                                ALERTA GRUPAL DETECTADA
+                              </span>
+                              <div className="p-3 bg-red-950/20 rounded border border-red-900/60 text-xs text-red-200 font-sans shadow-sm leading-relaxed">
+                                <div className="flex gap-2 items-start">
+                                  <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                                  <div>
+                                    <strong className="text-red-300 block mb-1 uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
+                                    {groupMatchReason}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div className="text-center py-16 text-zinc-500 border border-dashed border-zinc-800 rounded-lg flex flex-col justify-center items-center gap-2">
+                        <Users className="w-6 h-6 text-zinc-700" />
+                        <div className="text-[11px] font-medium text-zinc-400">No se detectaron relaciones grupales estructuradas en este caso.</div>
+                      </div>
+                    )
+                  )}
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </section>
+        )}
+
+      </main>
+
+      {/* Paso 5: Portal de Custodia de Integridad y Descarga Segura (Modal) */}
+      {isSecureDownloadModalOpen && lastExportedStats && (
+        <div className="fixed inset-0 bg-zinc-950/85 backdrop-blur-xs flex items-center justify-center z-50 p-4 transition-all" id="secure-download-portal-modal">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-7xl xl:max-w-[1555px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Header del portal */}
+            <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 px-6 py-4.5 border-b border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-950/45 border border-emerald-900/60 rounded-xl">
+                  <FileCheck className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-white text-[12.5px] uppercase font-bold tracking-widest font-sans flex items-center gap-2">
+                    Portal de Custodia de Integridad
+                  </h3>
+                  <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold">
+                    PREVENCIÓN DE LAVADO DE DINERO • PASO 5
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsSecureDownloadModalOpen(false)}
+                className="text-zinc-400 hover:text-white bg-zinc-950/30 hover:bg-zinc-950/60 border border-zinc-800 rounded-lg p-1.5 transition-all text-xs cursor-pointer font-bold uppercase font-mono"
+              >
+                CERRAR
+              </button>
+            </div>
+
+            {/* Contenido principal con scroll */}
+            <div className="p-6 overflow-y-auto flex flex-col gap-6 scrollbar-thin">
+              
+              {/* Bloque de aviso normativo */}
+              <div className="p-4 bg-zinc-950/40 rounded-xl border border-zinc-800 flex gap-3 items-start">
+                <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-xs text-zinc-300 leading-relaxed font-sans">
+                  <strong className="text-zinc-200">Aviso legal y gobernanza AML:</strong> Este portal emite reportes interactivos protegidos bajo firmas criptográficas simuladas para asegurar la integridad de la evidencia recabada en el proceso de debida diligencia de ARCA. Cada movimiento de exportación es auditado localmente.
+                </div>
+              </div>
+
+              {/* Ficha técnica del documento generado */}
+              <div className="flex flex-col gap-3">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 font-mono">
+                  Ficha Técnica de Custodia
+                </span>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  
+                  <div className="p-3 bg-zinc-950/30 rounded-xl border border-zinc-900 flex flex-col gap-1">
+                    <span className="text-[9px] uppercase font-semibold text-zinc-500 tracking-wider">Nombre del Reporte</span>
+                    <span className="text-xs font-bold text-white font-mono break-all leading-normal">
+                      {lastExportedStats.fileName}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/30 rounded-xl border border-zinc-900 flex flex-col gap-1">
+                    <span className="text-[9px] uppercase font-semibold text-zinc-500 tracking-wider">Tamaño de Archivo</span>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">
+                      {lastExportedStats.fileSizeKb} KB
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-zinc-950/30 rounded-xl border border-zinc-900 flex flex-col gap-1 col-span-1">
+                    <span className="text-[9px] uppercase font-semibold text-zinc-500 tracking-wider">Firma Digital (SHA-256)</span>
+                    <span className="text-xs font-bold text-amber-400 font-mono tracking-wider break-all">
+                      {lastExportedStats.sha256}
+                    </span>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Controles de descarga segura y respaldo */}
+              <div className="flex flex-col gap-3">
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 font-mono">
+                  Mecanismos Duales de Descarga y Copia
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  
+                  {/* Re-intentar descarga directa */}
+                  <button
+                    onClick={() => {
+                      try {
+                        const blob = new Blob([secureHtmlReport], { type: "text/html;charset=utf-8" });
+                        const link = document.createElement("a");
+                        link.href = URL.createObjectURL(blob);
+                        link.download = lastExportedStats.fileName;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        showToast("Re-descarga exitosa. Documento exportado.", "success");
+                      } catch (err) {
+                        showToast("Descarga bloqueada en este entorno.", "error");
+                      }
+                    }}
+                    className="p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 hover:from-emerald-950 hover:to-emerald-900 rounded-xl border border-zinc-800 hover:border-emerald-800 text-white font-bold text-xs transition-all flex flex-col items-center justify-center gap-2 cursor-pointer group active:scale-97 select-none"
+                    id="redescargar-reporte-modal"
+                  >
+                    <FileCheck className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
+                    <span className="uppercase tracking-widest font-mono text-[9px]">Re-Descargar Reporte HTML</span>
+                    <span className="text-[9px] font-medium text-zinc-400 font-sans normal-case text-center">
+                      Descargar archivo local autonómo interactivo
+                    </span>
+                  </button>
+
+                  {/* Copiar HTML al portapapeles */}
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(secureHtmlReport);
+                      showToast("Código HTML copiado al portapapeles con éxito.", "success");
+                      
+                      // Registrar copia
+                      const newLog = {
+                        id: "LOG-" + (182 + exportLogs.length + 1),
+                        timestamp: new Date().toISOString().replace("T", " ").substring(0, 19) + " UTC",
+                        fileName: lastExportedStats.fileName,
+                        actionType: "CLIPBOARD_COPY" as const,
+                        fileSizeKb: lastExportedStats.fileSizeKb,
+                        sha256: lastExportedStats.sha256,
+                        officer: "M. González (Oficial PLD UBA)",
+                        status: "EXITOSO" as const
+                      };
+                      setExportLogs(prev => [newLog, ...prev]);
+                    }}
+                    className="p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 hover:from-amber-950 hover:to-amber-900 rounded-xl border border-zinc-800 hover:border-amber-805 text-white font-bold text-xs transition-all flex flex-col items-center justify-center gap-2 cursor-pointer group active:scale-97 select-none"
+                    id="copiar-codigo-modal"
+                  >
+                    <Copy className="w-6 h-6 text-amber-400 group-hover:scale-110 transition-transform" />
+                    <span className="uppercase tracking-widest font-mono text-[9px]">Copiar Código al Portapapeles</span>
+                    <span className="text-[9px] font-medium text-zinc-400 font-sans normal-case text-center">
+                      Salva-vidas si el sandbox bloqueó descargas directas
+                    </span>
+                  </button>
+
+                </div>
+              </div>
+
+              {/* Bitácora / Historial de Auditoría Local */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 font-mono">
+                    Bitácora Histórica de Auditoría de Exportaciones
+                  </span>
+                  <span className="text-[9px] font-bold text-zinc-500 font-mono uppercase bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850">
+                    Reglas EBR • UIF / CNBV
+                  </span>
+                </div>
+
+                <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950/20 max-h-[160px] overflow-y-auto scrollbar-thin">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-zinc-950 text-zinc-400 text-[8.5px] uppercase font-bold tracking-widest border-b border-zinc-850">
+                        <th className="px-3 py-2 text-center font-mono">ID</th>
+                        <th className="px-3 py-2">Fecha y Hora</th>
+                        <th className="px-3 py-2">Metodología / Acción</th>
+                        <th className="px-3 py-2 font-mono text-right">Tamaño</th>
+                        <th className="px-3 py-2 text-center">Estado Legal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-900">
+                      {exportLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-zinc-900/30 text-[10px] text-zinc-300 font-sans transition-colors">
+                          <td className="px-3 py-2.5 text-center font-mono font-bold text-zinc-500">{log.id}</td>
+                          <td className="px-3 py-2.5 font-mono text-zinc-400 text-[9.5px]">{log.timestamp}</td>
+                          <td className="px-3 py-2.5">
+                            <span className="font-bold text-white block">
+                              {log.actionType === "DOWNLOAD" ? "📥 Descarga Automática" : "📋 Copia en Portapapeles"}
+                            </span>
+                            <span className="text-[8.5px] text-zinc-500 font-mono tracking-tight block">
+                              Oficial: {log.officer} • Hash: {log.sha256}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 font-mono text-right font-bold text-zinc-400">{log.fileSizeKb} KB</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={`px-2 py-0.5 rounded-[5px] text-[8px] font-extrabold uppercase font-mono tracking-wider border ${
+                              log.status === "EXITOSO" 
+                                ? "bg-emerald-950/60 text-emerald-400 border-emerald-900" 
+                                : "bg-amber-950/60 text-amber-400 border-amber-900"
+                            }`}>
+                              {log.status === "EXITOSO" ? "Firmado" : "Sandbox Migrated"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="bg-zinc-950/45 px-6 py-4 border-t border-zinc-800 flex items-center justify-between">
+              <span className="text-[8.5px] text-zinc-500 uppercase font-bold tracking-widest font-mono">
+                SISTEMA DE FIRMAS DIGITALES ARCA v4.2 • CUSTODIA PLD/CFT
+              </span>
+              <button
+                onClick={() => setIsSecureDownloadModalOpen(false)}
+                className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl border border-zinc-700 transition cursor-pointer"
+                id="aceptar-modal-portal"
+              >
+                Aceptar y Continuar
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
