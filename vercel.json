@@ -2,6 +2,9 @@
   "framework": null,
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/index.cjs": {}
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" }
   ]
