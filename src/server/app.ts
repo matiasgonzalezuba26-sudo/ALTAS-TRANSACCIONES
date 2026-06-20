@@ -428,3 +428,9 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
     return res.status(500).json({ error: error.message || "Error procesando el lote de transacciones." });
   }
 });
+
+// Export default: la app de Express es directamente invocable como (req, res),
+// lo cual es compatible con el formato de handler que Vercel espera para
+// funciones serverless de Node. Esto permite reusar exactamente la misma
+// app tanto en local (server.ts -> app.listen) como en Vercel (api/index.js).
+export default app;
