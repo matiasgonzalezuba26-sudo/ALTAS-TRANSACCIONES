@@ -3,7 +3,9 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.cjs": {}
+    "api/index.cjs": {
+      "maxDuration": 30
+    }
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index" }
