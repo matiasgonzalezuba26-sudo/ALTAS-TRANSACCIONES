@@ -356,19 +356,30 @@ export default function App() {
     setTimeout(() => setToast(null), 4500);
   };
 
-  // Supabase state simulation
-  const [isSupabaseOnline, setIsSupabaseOnline] = useState(true);
+  // Supabase connection status (real check against /api/supabase/status)
+  const [isSupabaseOnline, setIsSupabaseOnline] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
-  const [supabaseLatency, setSupabaseLatency] = useState(12);
+  const [supabaseLatency, setSupabaseLatency] = useState<number | null>(null);
 
-  const handleTestSupabase = () => {
+  const handleTestSupabase = async () => {
     setTestingConnection(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/supabase/status");
+      const data = await res.json();
+      setIsSupabaseOnline(!!data.online);
+      setSupabaseLatency(typeof data.latencyMs === "number" ? data.latencyMs : null);
+    } catch {
+      setIsSupabaseOnline(false);
+      setSupabaseLatency(null);
+    } finally {
       setTestingConnection(false);
-      setSupabaseLatency(Math.floor(Math.random() * 15) + 6);
-      setIsSupabaseOnline(true);
-    }, 750);
+    }
   };
+
+  // Check connection once on mount
+  useEffect(() => {
+    handleTestSupabase();
+  }, []);
 
   // Filtered transactions and arca records in the specified date range
   const { filteredTransactions, filteredArcaRecords } = useMemo(() => {

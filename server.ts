@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { supabaseAdmin, isSupabaseConfigured } from "./src/lib/supabaseAdmin";
 
 dotenv.config();
 
@@ -181,6 +182,106 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
   };
 }
 
+// Persiste un análisis (summary + transacciones + nodos + edges) en Supabase.
+// No bloquea ni rompe la respuesta al cliente si falla: solo loguea el error.
+async function persistAnalysis(params: {
+  transactions: any[];
+  threshold: number;
+  antiquityLimit: number;
+  usedAi: boolean;
+  result: { summary: any; nodes: any[]; edges: any[] };
+}) {
+  if (!isSupabaseConfigured || !supabaseAdmin) return;
+
+  try {
+    const { transactions, threshold, antiquityLimit, usedAi, result } = params;
+
+    const { data: analysisRow, error: analysisError } = await supabaseAdmin
+      .from("analyses")
+      .insert({
+        threshold,
+        antiquity_days_limit: antiquityLimit,
+        used_ai: usedAi,
+        total_cuits_analyzed: result.summary?.total_cuits_analyzed ?? 0,
+        high_risk_cases_detected: result.summary?.high_risk_cases_detected ?? 0,
+        total_volume_processed_ars: result.summary?.total_volume_processed_ars ?? 0
+      })
+      .select("id")
+      .single();
+
+    if (analysisError || !analysisRow) {
+      console.error("[supabase] No se pudo crear el registro de análisis:", analysisError);
+      return;
+    }
+
+    const analysisId = analysisRow.id;
+
+    const parseFecha = (f: string) => {
+      if (!f) return null;
+      const [d, m, y] = f.split("/").map(Number);
+      if (!d || !m || !y) return null;
+      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    };
+
+    if (transactions.length > 0) {
+      const txRows = transactions.map(t => ({
+        analysis_id: analysisId,
+        operacion: t.OPERACION || "TRANSFERENCIA",
+        tipo: t.TIPO,
+        fecha: parseFecha(t.FECHA),
+        monto: parseFloat(t.MONTO) || 0,
+        cuit: t.CUIT,
+        cuit_contraparte: t.CUIT_CONTRAPARTE,
+        fecha_alta_cuit: parseFecha(t.FECHA_ALTA_CUIT),
+        denominacion_sujeto: t.DENOMINACION_SUJETO || null,
+        denominacion_contraparte: t.DENOMINACION_CONTRAPARTE || null
+      }));
+      const { error: txError } = await supabaseAdmin.from("transactions").insert(txRows);
+      if (txError) console.error("[supabase] Error guardando transacciones:", txError);
+    }
+
+    if (result.nodes?.length > 0) {
+      const nodeRows = result.nodes.map(n => ({
+        analysis_id: analysisId,
+        node_ref: n.id,
+        label: n.label,
+        type: n.type,
+        risk_level: n.risk_level,
+        antiquity_days: n.antiquity_days ?? null,
+        suspicion_cause: n.suspicion_cause ?? null
+      }));
+      const { error: nodesError } = await supabaseAdmin.from("aml_nodes").insert(nodeRows);
+      if (nodesError) console.error("[supabase] Error guardando nodos:", nodesError);
+    }
+
+    if (result.edges?.length > 0) {
+      const edgeRows = result.edges.map(e => ({
+        analysis_id: analysisId,
+        source_ref: e.source,
+        target_ref: e.target,
+        amount_ars: e.amount_ars,
+        date: parseFecha(e.date),
+        alert_reason: e.alert_reason ?? null
+      }));
+      const { error: edgesError } = await supabaseAdmin.from("aml_edges").insert(edgeRows);
+      if (edgesError) console.error("[supabase] Error guardando edges:", edgesError);
+    }
+  } catch (err) {
+    console.error("[supabase] Error inesperado persistiendo análisis:", err);
+  }
+}
+
+// Endpoint de salud para verificar conexión real con Supabase desde el frontend
+app.get("/api/supabase/status", async (req, res) => {
+  if (!isSupabaseConfigured || !supabaseAdmin) {
+    return res.json({ online: false, configured: false });
+  }
+  const start = Date.now();
+  const { error } = await supabaseAdmin.from("analyses").select("id").limit(1);
+  const latencyMs = Date.now() - start;
+  return res.json({ online: !error, configured: true, latencyMs });
+});
+
 // Endpoint implementation
 app.post("/api/analyze", async (req, res) => {
   try {
@@ -273,7 +374,16 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
         }
 
         const parsedJson = JSON.parse(cleanedText);
-        
+
+        // Persist asynchronously without blocking the response
+        persistAnalysis({
+          transactions,
+          threshold: numericThreshold,
+          antiquityLimit: numericAntiquityLimit,
+          usedAi: true,
+          result: parsedJson
+        });
+
         // Return analytical workspace result
         return res.json({
           analysis: parsedJson,
@@ -284,6 +394,15 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
         console.error("AI Analysis failed, falling back to local engine:", aiError);
         // Fallback to local engine immediately on API failure
         const localResult = performLocalAnalysis(transactions, numericThreshold, numericAntiquityLimit, arcaRecords);
+
+        persistAnalysis({
+          transactions,
+          threshold: numericThreshold,
+          antiquityLimit: numericAntiquityLimit,
+          usedAi: false,
+          result: localResult
+        });
+
         return res.json({
           analysis: localResult,
           engine: "Deterministic Local Forensic Engine (Vía Fallback de IA - " + aiError.message + ")"
@@ -292,6 +411,15 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
     } else {
       // Local analysis triggered intentionally or due to missing key
       const localResult = performLocalAnalysis(transactions, numericThreshold, numericAntiquityLimit, arcaRecords);
+
+      persistAnalysis({
+        transactions,
+        threshold: numericThreshold,
+        antiquityLimit: numericAntiquityLimit,
+        usedAi: false,
+        result: localResult
+      });
+
       return res.json({
         analysis: localResult,
         engine: hasApiKey ? "Deterministic Local Forensic Engine" : "Deterministic Local Forensic Engine (Sin API Key configurada)"
