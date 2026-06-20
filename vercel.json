@@ -2,6 +2,6 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index.cjs" }
+    { "source": "/api/(.*)", "destination": "/api/index" }
   ]
 }
