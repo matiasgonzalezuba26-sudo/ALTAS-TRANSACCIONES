@@ -1075,8 +1075,10 @@ export default function App() {
       forensicMode,
       currentCuit: currentCuit || undefined,
       selectedGroupId: selectedGroupId || (groupFallback ? groupFallback.id : undefined),
+      graphNodes: analysisResult?.nodes || [],
+      graphEdges: analysisResult?.edges || [],
     });
-  }, [analysisMonth, lookbackMonths, threshold, selectedPresetId, filteredTransactions, positiveCases, cuitDenominacionesMap, activeGroup, detectedGroupFlows, antiquityLimit, activeTab, forensicMode, currentCuit, selectedGroupId]);
+  }, [analysisMonth, lookbackMonths, threshold, selectedPresetId, filteredTransactions, positiveCases, cuitDenominacionesMap, activeGroup, detectedGroupFlows, antiquityLimit, activeTab, forensicMode, currentCuit, selectedGroupId, analysisResult]);
 
   // Filter nodes and edges for FLUJO INDIVIDUAL to show ONLY the selected CUIT and its direct counterparties / transactions
   const forensicGraphData = useMemo(() => {

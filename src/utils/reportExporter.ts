@@ -1,4 +1,4 @@
-import { Transaction } from "../types";
+import { Transaction, AMLNode, AMLEdge } from "../types";
 
 export interface CapturedAMLState {
   reportDate: string;
@@ -54,6 +54,13 @@ export interface CapturedAMLState {
     altaDate: string;
     antiquity_days: number;
   }>;
+
+  // Grafo completo calculado por el motor AML (mismos datos que usa la app en vivo
+  // para el panel "Análisis de Flujos"), necesario para que el reporte exportado
+  // tenga exactamente la misma información que la app, incluyendo relaciones de
+  // segundo nivel entre contrapartes (ej: contraparte común -> su propia contraparte).
+  graphNodes: AMLNode[];
+  graphEdges: AMLEdge[];
 }
 
 /**
@@ -84,6 +91,8 @@ export function captureCurrentAMLState(params: {
   forensicMode?: "individual" | "grupal";
   currentCuit?: string;
   selectedGroupId?: string | null;
+  graphNodes?: AMLNode[];
+  graphEdges?: AMLEdge[];
 }): CapturedAMLState {
   const {
     analysisMonth,
@@ -100,6 +109,8 @@ export function captureCurrentAMLState(params: {
     forensicMode,
     currentCuit,
     selectedGroupId,
+    graphNodes,
+    graphEdges,
   } = params;
 
   // Calcular métricas agregadas
@@ -184,6 +195,8 @@ export function captureCurrentAMLState(params: {
     cuitDenominacionesMap,
     allTransactions: transactions,
     positiveCases,
+    graphNodes: graphNodes || [],
+    graphEdges: graphEdges || [],
   };
 }
 
@@ -1275,7 +1288,9 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       document.getElementById("forensic-active-detail-text").innerHTML = titleDetailStr;
 
       // 3. Dibujar Grafo SVG
-      renderLocalSVG(receives, sends, internals, isGrupal);
+      const activeSubjects = isGrupal ? reportState.groupNetwork.subjects : [selectedCuit];
+      const activeCommonCounterparts = isGrupal ? reportState.groupNetwork.commonCounterparts : [];
+      renderLocalSVG(activeSubjects, activeCommonCounterparts, isGrupal);
     }
 
     // Renderizar Tablas Locales
@@ -1315,7 +1330,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
 
     function wrapText(text, maxLen) {
       const limit = maxLen || 18;
-      const words = String(text || "").split(/\s+/);
+      const words = String(text || "").trim().split(" ").filter(w => w.length > 0);
       const lines = [];
       let currentLine = "";
       for (const word of words) {
@@ -1341,7 +1356,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
     // Dibujar el Grafo en el SVG del Reporte Descargado
     // Layout fijo izquierda-centro-derecha (idéntico al componente NetworkGraph de la app en vivo),
     // sin simulación de físicas: las posiciones son estables y predecibles.
-    function renderLocalSVG(receives, sends, internals, isGrupal) {
+    function renderLocalSVG(activeSubjects, activeCommonCounterparts, isGrupal) {
       const svg = document.getElementById("forensic-network-svg");
       svg.innerHTML = ''; // Limpiar
 
@@ -1356,6 +1371,47 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       const vbHeight = 380;
       const marginY = 50;
       const denoms = reportState.cuitDenominacionesMap || {};
+      const allGraphNodes = reportState.graphNodes || [];
+      const allGraphEdges = reportState.graphEdges || [];
+
+      // --- Filtrar el grafo completo a los nodos/edges relevantes para el sujeto o grupo activo ---
+      // (réplica de activeUnconsolidatedGraphData de la app: edges conectados a algún sujeto activo,
+      // más todos los nodos involucrados en esas edges - incluye contrapartes de segundo nivel)
+      const subjectSet = new Set(activeSubjects);
+      const filteredEdges = allGraphEdges.filter(e => subjectSet.has(e.source) || subjectSet.has(e.target));
+      const involvedIds = new Set(activeSubjects);
+      filteredEdges.forEach(e => {
+        involvedIds.add(e.source);
+        involvedIds.add(e.target);
+      });
+      const filteredNodes = allGraphNodes.filter(n => involvedIds.has(n.id));
+
+      // --- Categorizar contrapartes (réplica de consolidateGraphData de la app) ---
+      const commonSet = new Set(activeCommonCounterparts);
+      const counterparts = filteredNodes.filter(n => !subjectSet.has(n.id) && !commonSet.has(n.id));
+
+      const nodeVolumes = {};
+      filteredNodes.forEach(n => { nodeVolumes[n.id] = 0; });
+      filteredEdges.forEach(e => {
+        if (nodeVolumes[e.source] !== undefined) nodeVolumes[e.source] += e.amount_ars;
+        if (nodeVolumes[e.target] !== undefined) nodeVolumes[e.target] += e.amount_ars;
+      });
+
+      const senders = [];
+      const receivers = [];
+      const both = [];
+      counterparts.forEach(c => {
+        const isSender = filteredEdges.some(e => e.source === c.id && subjectSet.has(e.target));
+        const isReceiver = filteredEdges.some(e => e.target === c.id && subjectSet.has(e.source));
+        if (isSender && isReceiver) both.push(c);
+        else if (isSender) senders.push(c);
+        else if (isReceiver) receivers.push(c);
+        else senders.push(c); // contraparte indirecta (ej: segundo nivel) sin conexión directa al sujeto
+      });
+
+      const byVolDesc = (arr) => [...arr].sort((a, b) => (nodeVolumes[b.id] || 0) - (nodeVolumes[a.id] || 0));
+      const leftNodes = byVolDesc(receivers); // entran dinero hacia el sujeto -> a la izquierda
+      const rightNodes = byVolDesc([...senders, ...both]); // egresan o ambos -> a la derecha
 
       const nodes = [];
       const links = [];
@@ -1365,72 +1421,51 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         const leftX = vbWidth * 0.15;
         const centerX = vbWidth * 0.5;
         const rightX = vbWidth * 0.85;
+        const selectedCuitLocal = activeSubjects[0];
 
-        // Orígenes (RECIBE) a la izquierda
-        const maxPerif = 5;
-        const subRecs = receives.slice(0, maxPerif);
-        const subSnds = sends.slice(0, maxPerif);
+        const maxPerif = 6;
+        const leftSlice = leftNodes.slice(0, maxPerif);
+        const rightSlice = rightNodes.slice(0, maxPerif);
 
-        subRecs.forEach((node, idx) => {
-          const y = subRecs.length > 1
-            ? marginY + (idx * (vbHeight - marginY * 2)) / (subRecs.length - 1)
+        leftSlice.forEach((node, idx) => {
+          const y = leftSlice.length > 1
+            ? marginY + (idx * (vbHeight - marginY * 2)) / (leftSlice.length - 1)
             : vbHeight / 2;
           nodes.push({
-            id: node.cuit,
-            cuit: node.cuit,
-            denom: node.denom || node.cuit,
+            id: node.id,
+            cuit: node.id,
+            denom: denoms[node.id] || node.label || node.id,
             isCentral: false,
-            type: 'RECIBE',
-            sum: node.sum,
             color: "#22c55e",
             fill: "#d1fae5",
             r: 20,
             x: leftX,
             y: y
           });
-          links.push({
-            source: node.cuit,
-            target: selectedCuit,
-            color: "#22c55e",
-            markerId: "arrow-local-rec",
-            sum: node.sum,
-            isRec: true
-          });
         });
 
-        // Destinos (ORDENA) a la derecha
-        subSnds.forEach((node, idx) => {
-          const y = subSnds.length > 1
-            ? marginY + (idx * (vbHeight - marginY * 2)) / (subSnds.length - 1)
+        rightSlice.forEach((node, idx) => {
+          const y = rightSlice.length > 1
+            ? marginY + (idx * (vbHeight - marginY * 2)) / (rightSlice.length - 1)
             : vbHeight / 2;
           nodes.push({
-            id: node.cuit,
-            cuit: node.cuit,
-            denom: node.denom || node.cuit,
+            id: node.id,
+            cuit: node.id,
+            denom: denoms[node.id] || node.label || node.id,
             isCentral: false,
-            type: 'ORDENA',
-            sum: node.sum,
             color: "#f97316",
             fill: "#ffedd5",
             r: 20,
             x: rightX,
             y: y
           });
-          links.push({
-            source: selectedCuit,
-            target: node.cuit,
-            color: "#f97316",
-            markerId: "arrow-local-snd",
-            sum: node.sum,
-            isRec: false
-          });
         });
 
         // Sujeto analizado en el centro
         nodes.push({
-          id: selectedCuit,
-          cuit: selectedCuit,
-          denom: denoms[selectedCuit] || "Sujeto Analizado",
+          id: selectedCuitLocal,
+          cuit: selectedCuitLocal,
+          denom: denoms[selectedCuitLocal] || "Sujeto Analizado",
           isCentral: true,
           isSubject: true,
           color: "#ef4444",
@@ -1439,17 +1474,37 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           x: centerX,
           y: vbHeight / 2
         });
+
+        // Construir edges visuales a partir de las edges reales filtradas, preservando
+        // relaciones de segundo nivel entre contrapartes (no solo hacia el sujeto central)
+        const placedIds = new Set(nodes.map(n => n.id));
+        filteredEdges.forEach((e, idx) => {
+          if (!placedIds.has(e.source) || !placedIds.has(e.target)) return;
+          const towardsSubject = e.target === selectedCuitLocal;
+          const fromSubject = e.source === selectedCuitLocal;
+          let color = "#94a3b8";
+          let markerId = "arrow-local";
+          if (towardsSubject) { color = "#22c55e"; markerId = "arrow-local-rec"; }
+          else if (fromSubject) { color = "#f97316"; markerId = "arrow-local-snd"; }
+          links.push({
+            id: "local-edge-" + idx,
+            source: e.source,
+            target: e.target,
+            color: color,
+            markerId: markerId,
+            sum: e.amount_ars,
+            isRec: towardsSubject,
+            showLabel: true
+          });
+        });
       } else {
-        // --- MODO GRUPAL: Contraparte común al centro, sujetos a izquierda/derecha ---
-        const groupInfo = reportState.groupNetwork;
-        const subjectsList = groupInfo.subjects;
-        const counterpartsList = groupInfo.commonCounterparts;
+        // --- MODO GRUPAL: Contraparte común al centro, sujetos a izquierda, otras contrapartes a derecha ---
+        const commonCuit = activeCommonCounterparts[0] || "COMUN";
+        const commonName = denoms[commonCuit] || "Contraparte Central";
 
-        const commonCuit = counterpartsList[0] || "COMUN";
-        const commonName = reportState.cuitDenominacionesMap[commonCuit] || "Contraparte Central";
-
+        const leftX = vbWidth * 0.18;
         const centerX = vbWidth * 0.5;
-        const centerY = vbHeight / 2;
+        const rightX = vbWidth * 0.85;
 
         nodes.push({
           id: commonCuit,
@@ -1459,15 +1514,17 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           isCommon: true,
           color: "#3b82f6",
           fill: "#dbeafe",
-          r: 30,
+          r: 28,
           x: centerX,
-          y: centerY
+          y: vbHeight / 2
         });
 
-        const spacing = vbWidth * 0.3;
-        subjectsList.forEach((sub, idx) => {
-          const px = centerX + (idx % 2 === 0 ? -spacing : spacing);
-          const py = marginY + Math.floor(idx / 2) * 110 + 40;
+        // Sujetos del grupo a la izquierda
+        const subjectsOnly = activeSubjects.filter(s => s !== commonCuit);
+        subjectsOnly.forEach((sub, idx) => {
+          const y = subjectsOnly.length > 1
+            ? marginY + (idx * (vbHeight - marginY * 2)) / (subjectsOnly.length - 1)
+            : vbHeight / 2;
           nodes.push({
             id: sub,
             cuit: sub,
@@ -1477,15 +1534,46 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
             color: "#ef4444",
             fill: "#fee2e2",
             r: 24,
-            x: px,
-            y: Math.min(py, vbHeight - marginY)
+            x: leftX,
+            y: y
           });
+        });
+
+        // Otras contrapartes relacionadas (ej. segundo nivel, como una contraparte del nodo común) a la derecha
+        const placedSoFar = new Set(nodes.map(n => n.id));
+        const otherCounterparts = filteredNodes.filter(n => !placedSoFar.has(n.id));
+        const otherSlice = byVolDesc(otherCounterparts).slice(0, 6);
+        otherSlice.forEach((node, idx) => {
+          const y = otherSlice.length > 1
+            ? marginY + (idx * (vbHeight - marginY * 2)) / (otherSlice.length - 1)
+            : vbHeight / 2;
+          nodes.push({
+            id: node.id,
+            cuit: node.id,
+            denom: denoms[node.id] || node.label || node.id,
+            isCentral: false,
+            color: "#f97316",
+            fill: "#ffedd5",
+            r: 18,
+            x: rightX,
+            y: y
+          });
+        });
+
+        const placedIds = new Set(nodes.map(n => n.id));
+        filteredEdges.forEach((e, idx) => {
+          if (!placedIds.has(e.source) || !placedIds.has(e.target)) return;
+          const isFromSubjectToCommon = subjectSet.has(e.source) && commonSet.has(e.target);
           links.push({
-            source: sub,
-            target: commonCuit,
-            color: "#fb7185",
-            markerId: "arrow-local",
-            isGrupal: true
+            id: "local-edge-" + idx,
+            source: e.source,
+            target: e.target,
+            color: isFromSubjectToCommon ? "#fb7185" : "#f97316",
+            markerId: isFromSubjectToCommon ? "arrow-local" : "arrow-local-snd",
+            sum: e.amount_ars,
+            isRec: false,
+            isGrupal: isFromSubjectToCommon,
+            showLabel: true
           });
         });
       }
@@ -1546,9 +1634,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           const tx = tp.x - (dx / dr) * (targetNode.r + 8);
           const ty = tp.y - (dy / dr) * (targetNode.r + 8);
 
-          const pathD = link.isGrupal
-            ? "M" + sx + "," + sy + " A" + (dr * 1.4) + "," + (dr * 1.4) + " 0 0,1 " + tx + "," + ty
-            : "M" + sx + "," + sy + " L" + tx + "," + ty;
+          const pathD = "M" + sx + "," + sy + " A" + (dr * 1.5) + "," + (dr * 1.5) + " 0 0,1 " + tx + "," + ty;
 
           const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
           path.setAttribute("d", pathD);
@@ -1559,7 +1645,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           path.setAttribute("marker-end", "url(#" + link.markerId + ")");
           linkGroup.appendChild(path);
 
-          if (!link.isGrupal) {
+          if (link.showLabel && link.sum) {
             const midX = (sx + tx) / 2;
             const midY = (sy + ty) / 2;
             const valStr = Math.round(link.sum / 1000) + " k";
@@ -1575,14 +1661,14 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
             rect.setAttribute("height", "16");
             rect.setAttribute("rx", "5");
             rect.setAttribute("fill", "#18181b");
-            rect.setAttribute("stroke", link.isRec ? "#22c55e" : "#f97316");
+            rect.setAttribute("stroke", link.color);
             rect.setAttribute("stroke-width", "0.75");
             g.appendChild(rect);
 
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
             text.setAttribute("text-anchor", "middle");
             text.setAttribute("dy", "3.5");
-            text.setAttribute("fill", link.isRec ? "#4ade80" : "#fb923c");
+            text.setAttribute("fill", link.color);
             text.setAttribute("font-size", "9");
             text.setAttribute("font-family", "monospace");
             text.setAttribute("font-weight", "bold");
