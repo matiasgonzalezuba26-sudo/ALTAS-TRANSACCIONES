@@ -247,8 +247,6 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
   <title>Reporte Forense de Prevención de Lavado de Dinero (AML)</title>
   <!-- Tailwind CSS Play CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- D3.js para simulación interactiva de grafos -->
-  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
     body {
@@ -607,37 +605,6 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
                     $0 k
                   </span>
                 </div>
-              </div>
-            </div>
-
-            <!-- Tabla de traspasos internos de red (Fondo auto-compensado) - Oculta fuera del modo grupal -->
-            <div id="forensic-internas-section" class="hidden border border-zinc-800 rounded-xl p-6 bg-zinc-900/30 mt-6 shadow-sm">
-              <div class="border-b border-zinc-800 pb-2 mb-3.5 flex justify-between items-center bg-zinc-900/50 -mx-4 -mt-4 p-3 rounded-t-xl">
-                <span class="font-extrabold text-xs text-zinc-300 uppercase tracking-wider block">Movimientos Internos de la Red (Traspasos Circulares)</span>
-                <span class="bg-zinc-900 text-zinc-300 border border-zinc-800 text-[9px] uppercase font-bold px-2 py-0.5 rounded-full">AUTO-COMPENSACIÓN INTRAGRUIPAL</span>
-              </div>
-              <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr class="border-b border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider font-mono">
-                      <th class="pb-1.5 font-bold">CUIT Origen</th>
-                      <th class="pb-1.5 font-bold">Denominación Origen</th>
-                      <th class="pb-1.5 font-bold text-center">➔</th>
-                      <th class="pb-1.5 font-bold">CUIT Destino</th>
-                      <th class="pb-1.5 font-bold">Denominación Destino</th>
-                      <th class="pb-1.5 font-bold text-right">Volumen Canalizado</th>
-                    </tr>
-                  </thead>
-                  <tbody id="forensic-internas-tbody">
-                    <!-- Relleno por JS -->
-                  </tbody>
-                </table>
-              </div>
-              <div class="border-t border-zinc-800 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-300">
-                <span>VOLUMEN TOTAL TRANSFERIDO</span>
-                <span id="forensic-internas-total" class="font-mono text-xs text-zinc-300 font-extrabold bg-zinc-900 px-2.5 py-1 rounded border border-zinc-800">
-                  $0 k
-                </span>
               </div>
             </div>
 
@@ -1050,7 +1017,6 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         })).sort((a,b) => b.sum - a.sum);
 
         // Ocultar sección interna
-        document.getElementById("forensic-internas-section").classList.add("hidden");
         document.getElementById("grupal-warning-banner").classList.add("hidden");
         document.getElementById("label-origenes-title").innerText = "RECIBE";
         document.getElementById("label-destinos-title").innerText = "ORDENA";
@@ -1195,8 +1161,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           };
         }).sort((a,b) => b.sum - a.sum);
 
-        // Mostrar banner e internas
-        document.getElementById("forensic-internas-section").classList.remove("hidden");
+        // Mostrar banner intragrupal
         document.getElementById("grupal-warning-banner").classList.remove("hidden");
         document.getElementById("label-origenes-title").innerText = "INYECCIONES DE CAPITAL EXTERNO";
         document.getElementById("label-destinos-title").innerText = "LIQUIDACIONES EXTERNAS DE RED";
@@ -1306,12 +1271,6 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       document.getElementById("forensic-recibe-total").innerText = formatInThousands(recTotalSum);
       document.getElementById("forensic-ordena-total").innerText = formatInThousands(sndTotalSum);
 
-      if (isGrupal) {
-        renderLocalInternTable("forensic-internas-tbody", internals);
-        const intTotalSum = internals.reduce((a,b) => a + b.sum, 0);
-        document.getElementById("forensic-internas-total").innerText = formatInThousands(intTotalSum);
-      }
-
       // Actualizar Encabezados
       document.getElementById("forensic-active-detail-text").innerHTML = titleDetailStr;
 
@@ -1341,146 +1300,147 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       });
     }
 
-    // Renderizar Tabla Internas Local
-    function renderLocalInternTable(tbodyId, list) {
-      const tbody = document.getElementById(tbodyId);
-      tbody.innerHTML = '';
-      if (list.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="py-10 text-center text-zinc-500 font-sans italic text-xs">Sin giros internos.</td></tr>';
-        return;
+    // Estado de Zoom/Pan/Drag del grafo (réplica fiel del comportamiento de la app en vivo)
+    let graphZoom = 1;
+    let graphPanX = 0;
+    let graphPanY = 0;
+    let graphIsPanning = false;
+    let graphPanStartX = 0;
+    let graphPanStartY = 0;
+    let graphDraggedNodeId = null;
+    let graphDraggedPositions = {};
+    let graphNodesRef = [];
+    let graphLinksRef = [];
+    let graphSelectedId = null;
+
+    function wrapText(text, maxLen) {
+      const limit = maxLen || 18;
+      const words = String(text || "").split(/\s+/);
+      const lines = [];
+      let currentLine = "";
+      for (const word of words) {
+        if ((currentLine + " " + word).trim().length <= limit) {
+          currentLine = (currentLine + " " + word).trim();
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = word;
+        }
       }
-      list.forEach((item, idx) => {
-        const tr = document.createElement("tr");
-        tr.className = "border-b border-zinc-800/80 hover:bg-zinc-900/40 text-[11.5px] text-zinc-300 transition-colors";
-        tr.innerHTML = \`
-          <td class="py-2.5 font-mono text-zinc-400 font-bold">\${item.senderCuit}</td>
-          <td class="py-2.5 text-zinc-100 truncate max-w-[200px]">\${item.senderDenom}</td>
-          <td class="py-2.5 text-center text-zinc-500 font-bold">➔</td>
-          <td class="py-2.5 font-mono text-zinc-400 font-bold">\${item.receiverCuit}</td>
-          <td class="py-2.5 text-zinc-100 truncate max-w-[200px]">\${item.receiverDenom}</td>
-          <td class="py-2.5 text-right font-mono font-bold text-white">\${formatInThousands(item.sum)}</td>
-\`;
-        tbody.appendChild(tr);
-      });
+      if (currentLine) lines.push(currentLine);
+      if (lines.length === 0) lines.push(text);
+      return lines;
     }
 
-    // Dibujar el Grafo en el SVG del Reporte Descargado (DINÁMICO interactivo con D3.js)
+    function applyGraphTransform() {
+      const zoomContainer = document.getElementById("forensic-zoom-container");
+      if (zoomContainer) {
+        zoomContainer.setAttribute("transform", "translate(" + graphPanX + "," + graphPanY + ") scale(" + graphZoom + ")");
+      }
+    }
+
+    // Dibujar el Grafo en el SVG del Reporte Descargado
+    // Layout fijo izquierda-centro-derecha (idéntico al componente NetworkGraph de la app en vivo),
+    // sin simulación de físicas: las posiciones son estables y predecibles.
     function renderLocalSVG(receives, sends, internals, isGrupal) {
       const svg = document.getElementById("forensic-network-svg");
       svg.innerHTML = ''; // Limpiar
 
-      // Definir marcadores de flechas para trazabilidad
-      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-      
-      // Flecha standard
-      const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-      marker.setAttribute("id", "arrow-local");
-      marker.setAttribute("viewBox", "0 0 10 10");
-      marker.setAttribute("refX", "22");
-      marker.setAttribute("refY", "5");
-      marker.setAttribute("markerWidth", "6");
-      marker.setAttribute("markerHeight", "6");
-      marker.setAttribute("orient", "auto-start-reverse");
-      marker.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="#71717a"/>';
-      defs.appendChild(marker);
+      // Reset del estado de interacción al recalcular el grafo (nuevo sujeto/grupo seleccionado)
+      graphZoom = 1;
+      graphPanX = 0;
+      graphPanY = 0;
+      graphDraggedPositions = {};
+      graphSelectedId = null;
 
-      // Flecha recibidas (Envía al sujeto -> Green #22c55e)
-      const markerRec = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-      markerRec.setAttribute("id", "arrow-local-rec");
-      markerRec.setAttribute("viewBox", "0 0 10 10");
-      markerRec.setAttribute("refX", "28");
-      markerRec.setAttribute("refY", "5");
-      markerRec.setAttribute("markerWidth", "5");
-      markerRec.setAttribute("markerHeight", "5");
-      markerRec.setAttribute("orient", "auto-start-reverse");
-      markerRec.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="#22c55e"/>';
-      defs.appendChild(markerRec);
-
-      // Flecha ordenadas (Recibe del sujeto -> Orange #f97316)
-      const markerSnd = document.createElementNS("http://www.w3.org/2000/svg", "marker");
-      markerSnd.setAttribute("id", "arrow-local-snd");
-      markerSnd.setAttribute("viewBox", "0 0 10 10");
-      markerSnd.setAttribute("refX", "28");
-      markerSnd.setAttribute("refY", "5");
-      markerSnd.setAttribute("markerWidth", "5");
-      markerSnd.setAttribute("markerHeight", "5");
-      markerSnd.setAttribute("orient", "auto-start-reverse");
-      markerSnd.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="#f97316"/>';
-      defs.appendChild(markerSnd);
-
-      svg.appendChild(defs);
-
-      const centerX = 380;
-      const centerY = 190;
+      const vbWidth = 760;
+      const vbHeight = 380;
+      const marginY = 50;
       const denoms = reportState.cuitDenominacionesMap || {};
 
       const nodes = [];
       const links = [];
 
       if (!isGrupal) {
-        // --- MODO INDIVIDUAL ---
-        // Nodo Central: Sujeto analizado (Más grande para legibilidad óptima)
-        nodes.push({
-          id: selectedCuit,
-          label: "SUJETO ANALIZADO",
-          isCentral: true,
-          isSubject: true,
-          cuit: selectedCuit,
-          denom: denoms[selectedCuit] || "Sujeto Analizado",
-          color: "#ef4444",
-          fill: "#fee2e2",
-          r: 38,
-          fx: centerX,
-          fy: centerY
-        });
+        // --- MODO INDIVIDUAL: Origenes (izq) -> Sujeto (centro) -> Destinos (der) ---
+        const leftX = vbWidth * 0.15;
+        const centerX = vbWidth * 0.5;
+        const rightX = vbWidth * 0.85;
 
-        // Nodos Periféricos
-        const maxPerif = 6;
-        const subRecs = receives.slice(0, Math.ceil(maxPerif / 2));
-        const subSnds = sends.slice(0, Math.floor(maxPerif / 2));
-        const perifNodes = [...subRecs.map(r => ({...r, type: 'RECIBE'})), ...subSnds.map(s => ({...s, type: 'ORDENA'}))];
+        // Orígenes (RECIBE) a la izquierda
+        const maxPerif = 5;
+        const subRecs = receives.slice(0, maxPerif);
+        const subSnds = sends.slice(0, maxPerif);
 
-        perifNodes.forEach((node, i) => {
-          const angle = (2 * Math.PI / perifNodes.length) * i;
-          const radius = 175;
+        subRecs.forEach((node, idx) => {
+          const y = subRecs.length > 1
+            ? marginY + (idx * (vbHeight - marginY * 2)) / (subRecs.length - 1)
+            : vbHeight / 2;
           nodes.push({
             id: node.cuit,
-            label: String(node.denom || node.cuit).slice(0, 24),
-            isCentral: false,
-            isSubject: false,
             cuit: node.cuit,
             denom: node.denom || node.cuit,
-            type: node.type,
+            isCentral: false,
+            type: 'RECIBE',
             sum: node.sum,
-            color: node.type === 'RECIBE' ? '#22c55e' : '#f97316',
-            fill: node.type === 'RECIBE' ? '#d1fae5' : '#ffedd5',
-            r: 24,
-            x: centerX + radius * Math.cos(angle),
-            y: centerY + radius * Math.sin(angle)
+            color: "#22c55e",
+            fill: "#d1fae5",
+            r: 20,
+            x: leftX,
+            y: y
           });
+          links.push({
+            source: node.cuit,
+            target: selectedCuit,
+            color: "#22c55e",
+            markerId: "arrow-local-rec",
+            sum: node.sum,
+            isRec: true
+          });
+        });
 
-          if (node.type === 'RECIBE') {
-            links.push({
-              source: node.cuit,
-              target: selectedCuit,
-              color: "#22c55e",
-              markerId: "arrow-local-rec",
-              sum: node.sum,
-              isRec: true
-            });
-          } else {
-            links.push({
-              source: selectedCuit,
-              target: node.cuit,
-              color: "#f97316",
-              markerId: "arrow-local-snd",
-              sum: node.sum,
-              isRec: false
-            });
-          }
+        // Destinos (ORDENA) a la derecha
+        subSnds.forEach((node, idx) => {
+          const y = subSnds.length > 1
+            ? marginY + (idx * (vbHeight - marginY * 2)) / (subSnds.length - 1)
+            : vbHeight / 2;
+          nodes.push({
+            id: node.cuit,
+            cuit: node.cuit,
+            denom: node.denom || node.cuit,
+            isCentral: false,
+            type: 'ORDENA',
+            sum: node.sum,
+            color: "#f97316",
+            fill: "#ffedd5",
+            r: 20,
+            x: rightX,
+            y: y
+          });
+          links.push({
+            source: selectedCuit,
+            target: node.cuit,
+            color: "#f97316",
+            markerId: "arrow-local-snd",
+            sum: node.sum,
+            isRec: false
+          });
+        });
+
+        // Sujeto analizado en el centro
+        nodes.push({
+          id: selectedCuit,
+          cuit: selectedCuit,
+          denom: denoms[selectedCuit] || "Sujeto Analizado",
+          isCentral: true,
+          isSubject: true,
+          color: "#ef4444",
+          fill: "#fee2e2",
+          r: 34,
+          x: centerX,
+          y: vbHeight / 2
         });
       } else {
-        // --- MODO GRUPAL ---
+        // --- MODO GRUPAL: Contraparte común al centro, sujetos a izquierda/derecha ---
         const groupInfo = reportState.groupNetwork;
         const subjectsList = groupInfo.subjects;
         const counterpartsList = groupInfo.commonCounterparts;
@@ -1488,41 +1448,38 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         const commonCuit = counterpartsList[0] || "COMUN";
         const commonName = reportState.cuitDenominacionesMap[commonCuit] || "Contraparte Central";
 
-        // Nodo central: Contraparte común
+        const centerX = vbWidth * 0.5;
+        const centerY = vbHeight / 2;
+
         nodes.push({
           id: commonCuit,
-          label: commonName.slice(0, 24).toUpperCase(),
-          subtitle: "CONTRAPARTE COMUN DE RED",
-          isCentral: true,
-          isCommon: true,
           cuit: commonCuit,
           denom: commonName,
+          isCentral: true,
+          isCommon: true,
           color: "#3b82f6",
           fill: "#dbeafe",
-          r: 32,
-          fx: centerX,
-          fy: centerY
+          r: 30,
+          x: centerX,
+          y: centerY
         });
 
-        // Sujetos del grupo
+        const spacing = vbWidth * 0.3;
         subjectsList.forEach((sub, idx) => {
-          const spacing = 220;
-          const px = centerX + (idx === 0 ? -spacing : spacing);
+          const px = centerX + (idx % 2 === 0 ? -spacing : spacing);
+          const py = marginY + Math.floor(idx / 2) * 110 + 40;
           nodes.push({
             id: sub,
-            label: (denoms[sub] || sub).slice(0, 24),
-            subtitle: "SUJETO ANALIZADO",
-            isCentral: false,
-            isSubject: true,
             cuit: sub,
             denom: denoms[sub] || sub,
+            isCentral: false,
+            isSubject: true,
             color: "#ef4444",
             fill: "#fee2e2",
-            r: 26,
+            r: 24,
             x: px,
-            y: centerY + (idx === 0 ? -20 : 20)
+            y: Math.min(py, vbHeight - marginY)
           });
-
           links.push({
             source: sub,
             target: commonCuit,
@@ -1533,247 +1490,244 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         });
       }
 
-      // Inicializar simulación drag y fuerza de D3
-      const d3Svg = d3.select(svg);
+      graphNodesRef = nodes;
+      graphLinksRef = links;
 
-      // Limpiar elementos g de d3 anteriores si los hay
-      d3Svg.selectAll("g.zoom-container").remove();
+      // --- Definiciones de marcadores de flecha ---
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      const makeMarker = (id, color, refX) => {
+        const m = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+        m.setAttribute("id", id);
+        m.setAttribute("viewBox", "0 0 10 10");
+        m.setAttribute("refX", String(refX));
+        m.setAttribute("refY", "5");
+        m.setAttribute("markerWidth", "6");
+        m.setAttribute("markerHeight", "6");
+        m.setAttribute("orient", "auto-start-reverse");
+        m.innerHTML = '<path d="M0,0 L10,5 L0,10 z" fill="' + color + '"/>';
+        defs.appendChild(m);
+      };
+      makeMarker("arrow-local", "#fb7185", 8);
+      makeMarker("arrow-local-rec", "#22c55e", 8);
+      makeMarker("arrow-local-snd", "#f97316", 8);
+      svg.appendChild(defs);
 
-      // Crear grupo contenedor de Zoom para envolver todos los elementos del grafo
-      const zoomContainer = d3Svg.append("g").attr("class", "zoom-container");
+      // --- Contenedor de zoom/pan ---
+      const zoomContainer = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      zoomContainer.setAttribute("id", "forensic-zoom-container");
+      svg.appendChild(zoomContainer);
 
-      // Configurar comportamiento interactivo de Zoom y Pan en D3
-      const zoomBehavior = d3.zoom()
-        .scaleExtent([0.3, 3.0])
-        .on("zoom", (event) => {
-          zoomContainer.attr("transform", event.transform);
+      const linkGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const nodeGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      zoomContainer.appendChild(linkGroup);
+      zoomContainer.appendChild(nodeGroup);
+
+      function getNodePos(n) {
+        const drag = graphDraggedPositions[n.id];
+        return drag ? drag : { x: n.x, y: n.y };
+      }
+
+      function redrawLinks() {
+        linkGroup.innerHTML = '';
+        links.forEach((link) => {
+          const sourceNode = nodes.find(n => n.id === link.source);
+          const targetNode = nodes.find(n => n.id === link.target);
+          if (!sourceNode || !targetNode) return;
+
+          const sp = getNodePos(sourceNode);
+          const tp = getNodePos(targetNode);
+
+          const dx = tp.x - sp.x;
+          const dy = tp.y - sp.y;
+          const dr = Math.sqrt(dx * dx + dy * dy) || 1;
+
+          const sx = sp.x + (dx / dr) * (sourceNode.r + 1);
+          const sy = sp.y + (dy / dr) * (sourceNode.r + 1);
+          const tx = tp.x - (dx / dr) * (targetNode.r + 8);
+          const ty = tp.y - (dy / dr) * (targetNode.r + 8);
+
+          const pathD = link.isGrupal
+            ? "M" + sx + "," + sy + " A" + (dr * 1.4) + "," + (dr * 1.4) + " 0 0,1 " + tx + "," + ty
+            : "M" + sx + "," + sy + " L" + tx + "," + ty;
+
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", pathD);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", link.color);
+          path.setAttribute("stroke-width", link.isGrupal ? "2.5" : "2.2");
+          path.setAttribute("opacity", "0.9");
+          path.setAttribute("marker-end", "url(#" + link.markerId + ")");
+          linkGroup.appendChild(path);
+
+          if (!link.isGrupal) {
+            const midX = (sx + tx) / 2;
+            const midY = (sy + ty) / 2;
+            const valStr = Math.round(link.sum / 1000) + " k";
+
+            const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+            g.setAttribute("transform", "translate(" + midX + "," + midY + ")");
+
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            const textWidth = valStr.length * 5.4 + 10;
+            rect.setAttribute("x", String(-textWidth / 2));
+            rect.setAttribute("y", "-8");
+            rect.setAttribute("width", String(textWidth));
+            rect.setAttribute("height", "16");
+            rect.setAttribute("rx", "5");
+            rect.setAttribute("fill", "#18181b");
+            rect.setAttribute("stroke", link.isRec ? "#22c55e" : "#f97316");
+            rect.setAttribute("stroke-width", "0.75");
+            g.appendChild(rect);
+
+            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            text.setAttribute("text-anchor", "middle");
+            text.setAttribute("dy", "3.5");
+            text.setAttribute("fill", link.isRec ? "#4ade80" : "#fb923c");
+            text.setAttribute("font-size", "9");
+            text.setAttribute("font-family", "monospace");
+            text.setAttribute("font-weight", "bold");
+            text.textContent = valStr;
+            g.appendChild(text);
+
+            linkGroup.appendChild(g);
+          }
         });
+      }
 
-      d3Svg.call(zoomBehavior);
+      function redrawNodes() {
+        nodeGroup.innerHTML = '';
+        nodes.forEach((n) => {
+          const pos = getNodePos(n);
+          const isSelected = graphSelectedId === n.id;
 
-      // Registrar callbacks globales de control de Zoom para sincronizarlos con los botones flotantes de la UI
+          const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+          g.setAttribute("transform", "translate(" + pos.x + "," + pos.y + ")");
+          g.style.cursor = "grab";
+
+          const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+          title.textContent = (n.denom || n.cuit) + " (" + n.cuit + ")";
+          g.appendChild(title);
+
+          const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          circle.setAttribute("r", String(n.r + (isSelected ? 3 : 0)));
+          circle.setAttribute("fill", n.fill);
+          circle.setAttribute("stroke", n.color);
+          circle.setAttribute("stroke-width", n.isCentral ? "3.5" : "1.75");
+          g.appendChild(circle);
+
+          const lines = wrapText(n.denom || "", 18);
+          const denomText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          denomText.setAttribute("text-anchor", "middle");
+          denomText.setAttribute("y", String(n.r + 14));
+          denomText.setAttribute("fill", "#f4f4f5");
+          denomText.setAttribute("font-size", n.isCentral ? "11" : "9.5");
+          denomText.setAttribute("font-family", "sans-serif");
+          denomText.setAttribute("font-weight", "bold");
+          lines.forEach((line, i) => {
+            const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+            tspan.setAttribute("x", "0");
+            tspan.setAttribute("dy", i === 0 ? "0" : "11");
+            tspan.textContent = line;
+            denomText.appendChild(tspan);
+          });
+          g.appendChild(denomText);
+
+          const cuitText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          cuitText.setAttribute("text-anchor", "middle");
+          cuitText.setAttribute("y", String(n.r + 14 + (lines.length - 1) * 11 + 14));
+          cuitText.setAttribute("fill", "#a1a1aa");
+          cuitText.setAttribute("font-size", n.isCentral ? "9.5" : "8.5");
+          cuitText.setAttribute("font-family", "monospace");
+          cuitText.setAttribute("font-weight", "bold");
+          cuitText.textContent = "CUIT " + n.cuit;
+          g.appendChild(cuitText);
+
+          // Drag individual del nodo (sin física, posición libre fija al soltar)
+          g.addEventListener("mousedown", (e) => {
+            e.stopPropagation();
+            graphDraggedNodeId = n.id;
+            g.style.cursor = "grabbing";
+          });
+
+          // Click para re-enfocar el sujeto analizado (igual que la app en vivo)
+          g.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!n.isCentral && n.cuit) {
+              goToForensicSubject(n.cuit);
+            } else {
+              graphSelectedId = (graphSelectedId === n.id) ? null : n.id;
+              redrawNodes();
+            }
+          });
+
+          nodeGroup.appendChild(g);
+        });
+      }
+
+      redrawLinks();
+      redrawNodes();
+      applyGraphTransform();
+
+      // --- Interacción de Pan (arrastrar fondo) y Drag de nodos ---
+      svg.onmousedown = (e) => {
+        if (graphDraggedNodeId) return;
+        graphIsPanning = true;
+        graphPanStartX = e.clientX - graphPanX;
+        graphPanStartY = e.clientY - graphPanY;
+        svg.style.cursor = "grabbing";
+      };
+
+      svg.onmousemove = (e) => {
+        if (graphDraggedNodeId) {
+          const rect = svg.getBoundingClientRect();
+          const scaleX = vbWidth / rect.width;
+          const scaleY = vbHeight / rect.height;
+          const mouseX = (e.clientX - rect.left) * scaleX;
+          const mouseY = (e.clientY - rect.top) * scaleY;
+          const graphX = (mouseX - graphPanX) / graphZoom;
+          const graphY = (mouseY - graphPanY) / graphZoom;
+          graphDraggedPositions[graphDraggedNodeId] = { x: graphX, y: graphY };
+          redrawLinks();
+          redrawNodes();
+        } else if (graphIsPanning) {
+          graphPanX = e.clientX - graphPanStartX;
+          graphPanY = e.clientY - graphPanStartY;
+          applyGraphTransform();
+        }
+      };
+
+      const stopInteraction = () => {
+        graphIsPanning = false;
+        graphDraggedNodeId = null;
+        svg.style.cursor = "grab";
+      };
+      svg.onmouseup = stopInteraction;
+      svg.onmouseleave = stopInteraction;
+      svg.style.cursor = "grab";
+
+      // --- Controles de Zoom (botones flotantes existentes en la UI) ---
       window.zoomInLocal = () => {
-        d3Svg.transition().duration(250).call(zoomBehavior.scaleBy, 1.25);
+        graphZoom = Math.min(graphZoom + 0.15, 2.5);
+        applyGraphTransform();
       };
       window.zoomOutLocal = () => {
-        d3Svg.transition().duration(250).call(zoomBehavior.scaleBy, 0.8);
+        graphZoom = Math.max(graphZoom - 0.15, 0.4);
+        applyGraphTransform();
       };
       window.resetZoomLocal = () => {
-        d3Svg.transition().duration(250).call(zoomBehavior.transform, d3.zoomIdentity);
+        graphZoom = 1;
+        graphPanX = 0;
+        graphPanY = 0;
+        graphDraggedPositions = {};
+        graphSelectedId = null;
+        applyGraphTransform();
+        redrawNodes();
       };
-
-      // Renderizar líneas y nodos dentro del zoomContainer interactivo
-      const linkGroup = zoomContainer.append("g").attr("class", "link-group");
-      const nodeGroup = zoomContainer.append("g").attr("class", "node-group");
-
-      const linkPaths = linkGroup.selectAll("path")
-        .data(links)
-        .enter()
-        .append("path")
-        .attr("class", "transition-all duration-500 ease-in-out")
-        .attr("stroke", d => d.color)
-        .attr("stroke-width", d => d.isGrupal ? "2.5" : "2.2")
-        .attr("fill", "none")
-        .attr("opacity", "0.85")
-        .attr("marker-end", d => "url(#" + d.markerId + ")");
-
-      // Pill group over link lines (individual mode) - dynamic mask badges
-      const linkTextGroup = linkGroup.selectAll("g.link-lbl")
-        .data(links.filter(d => !d.isGrupal))
-        .enter()
-        .append("g")
-        .attr("class", "link-lbl transition-all duration-500 ease-in-out");
-
-      // Background rect pill
-      linkTextGroup.append("rect")
-        .attr("rx", 5)
-        .attr("ry", 5)
-        .attr("fill", "#18181b")
-        .attr("stroke", d => d.isRec ? "#22c55e" : "#f97316")
-        .attr("stroke-width", "0.75")
-        .attr("opacity", "0.95");
-
-      // Label text
-      linkTextGroup.append("text")
-        .attr("text-anchor", "middle")
-        .attr("dy", "3")
-        .attr("fill", d => d.isRec ? "#4ade80" : "#fb923c") // Nice neon green/neon orange for high contrast on dark
-        .attr("font-size", "7.5")
-        .attr("font-family", "monospace")
-        .attr("font-weight", "bold");
-
-      // Container de cada nodo para mover circulos e iconos juntos
-      const nodeElements = nodeGroup.selectAll("g")
-        .data(nodes)
-        .enter()
-        .append("g")
-        .attr("class", "node-item cursor-pointer transition-all duration-500 ease-in-out")
-        .call(d3.drag()
-          .on("start", dragstarted)
-          .on("drag", dragged)
-          .on("end", dragended));
-
-      // Agregar título descriptivo para accesibilidad/hover
-      nodeElements.append("title")
-        .text(d => (d.denom || d.cuit) + " (" + d.cuit + ")");
-
-      // Círculo del nodo
-      nodeElements.append("circle")
-        .attr("class", "transition-all duration-500 ease-in-out")
-        .attr("r", d => d.r)
-        .attr("fill", d => d.fill)
-        .attr("stroke", d => d.color)
-        .attr("stroke-width", d => d.isCentral ? "3.5" : "1.75");
-
-      const wrapText = (text, maxLen) => {
-        const limit = maxLen || 18;
-        const words = text.split(" ");
-        const lines = [];
-        let currentLine = "";
-        for (const word of words) {
-          if ((currentLine + " " + word).trim().length <= limit) {
-            currentLine = (currentLine + " " + word).trim();
-          } else {
-            if (currentLine) lines.push(currentLine);
-            currentLine = word;
-          }
-        }
-        if (currentLine) lines.push(currentLine);
-        if (lines.length === 0) lines.push(text);
-        return lines;
-      };
-
-      // Denomination Name (Wrapped)
-      const denomTexts = nodeElements.append("text")
-        .attr("class", "denom-label transition-all duration-500 ease-in-out")
-        .attr("text-anchor", "middle")
-        .attr("y", d => d.r + 14)
-        .attr("fill", "#f4f4f5") // zinc-100 / light off-white
-        .attr("font-size", d => d.isCentral ? "11" : "9.5")
-        .attr("font-family", "sans-serif")
-        .attr("font-weight", "bold");
-
-      denomTexts.each(function(d) {
-        const el = d3.select(this);
-        const lines = wrapText(d.denom || "", 18);
-        lines.forEach((line, i) => {
-          el.append("tspan")
-            .attr("x", 0)
-            .attr("dy", i === 0 ? 0 : 11)
-            .text(line);
-        });
-      });
-
-      // CUIT (Positioned below the dynamic lines)
-      nodeElements.append("text")
-        .attr("class", "cuit-label transition-all duration-500 ease-in-out")
-        .attr("text-anchor", "middle")
-        .attr("y", d => {
-          const linesCount = wrapText(d.denom || "", 18).length;
-          return d.r + 14 + (linesCount - 1) * 11 + 14;
-        })
-        .attr("fill", "#a1a1aa") // zinc-405/light grey
-        .attr("font-size", d => d.isCentral ? "9.5" : "8.5")
-        .attr("font-family", "monospace")
-        .attr("font-weight", "bold")
-        .text(d => "CUIT " + d.cuit);
-
-      // D3 Force Simulation setup
-      const simulation = d3.forceSimulation(nodes)
-        .force("link", d3.forceLink(links).id(d => d.id).distance(d => d.isGrupal ? 220 : 160))
-        .force("charge", d3.forceManyBody().strength(d => d.isCentral ? -800 : -300))
-        .force("center", d3.forceCenter(centerX, centerY))
-        .force("collision", d3.forceCollide().radius(d => d.r + 35));
-
-      simulation.on("tick", () => {
-        // Mantener dentro de bordes seguros del SVG
-        nodes.forEach(d => {
-          const buffer = d.r + 40;
-          d.x = Math.max(buffer, Math.min(centerX * 2 - buffer, d.x));
-          d.y = Math.max(buffer, Math.min(centerY * 2 - buffer, d.y));
-        });
-
-        // Actualizar links con curvas o líneas directas
-        linkPaths.attr("d", d => {
-          if (d.isGrupal) {
-            // Curvatura suave para indicar de ida y vuelta
-            const dx = d.target.x - d.source.x;
-            const dy = d.target.y - d.source.y;
-            const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
-            return "M" + d.source.x + "," + d.source.y + " A" + dr + "," + dr + " 0 0,1 " + d.target.x + "," + d.target.y;
-          }
-          return "M" + d.source.x + "," + d.source.y + " L" + d.target.x + "," + d.target.y;
-        });
-
-        // Posición de los grupos de textos en las líneas (centrados y adaptativos)
-        linkTextGroup.attr("transform", d => {
-          const x = (d.source.x + d.target.x) / 2;
-          const y = (d.source.y + d.target.y) / 2;
-          return "translate(" + x + ", " + y + ")";
-        });
-
-        // Trazar dimensiones de píldoras dinámicamente según el tamaño del texto
-        linkTextGroup.each(function(d) {
-          const g = d3.select(this);
-          const valStr = Math.round(d.sum / 1000) + " k";
-          const textEl = g.select("text");
-          textEl.text(valStr);
-          
-          const textNode = textEl.node();
-          if (textNode) {
-            try {
-              const bbox = textNode.getBBox();
-              g.select("rect")
-                .attr("x", bbox.x - 5)
-                .attr("y", bbox.y - 1.5)
-                .attr("width", bbox.width + 10)
-                .attr("height", bbox.height + 3);
-            } catch (e) {
-              // Fallback estático en caso de que getBBox falle en entornos sin renderizador
-              g.select("rect")
-                .attr("x", -15)
-                .attr("y", -6)
-                .attr("width", 30)
-                .attr("height", 12);
-            }
-          }
-        });
-
-        // Posición de los elementos de nodo
-        nodeElements.attr("transform", d => "translate(" + d.x + ", " + d.y + ")");
-      });
-
-      // Dragging methods
-      function dragstarted(event, d) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      }
-
-      function dragged(event, d) {
-        d.fx = event.x;
-        d.fy = event.y;
-      }
-
-      function dragended(event, d) {
-        if (!event.active) simulation.alphaTarget(0);
-        if (!d.isCentral) {
-          d.fx = null;
-          d.fy = null;
-        }
-      }
-
-      // Clic para re-enfocar el sujeto analizado
-      nodeElements.on("click", (event, d) => {
-        if (!d.isCentral && d.cuit) {
-          // Re-enfocar localmente
-          goToForensicSubject(d.cuit);
-        }
-      });
     }
   </script>
 
 </body>
 </html>`;
 }
+
 
