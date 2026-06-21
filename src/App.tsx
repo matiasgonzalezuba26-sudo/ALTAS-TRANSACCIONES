@@ -290,12 +290,9 @@ export default function App() {
       umbral: r.umbral
     }));
   });
-  const [arcaRawText, setArcaRawText] = useState("");
   const [arcaImportError, setArcaImportError] = useState("");
   const [arcaSyncStatus, setArcaSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
 
-  // Custom copy-pasting Uploader States (Base de Operaciones)
-  const [opsRawText, setOpsRawText] = useState("");
   const [opsImportError, setOpsImportError] = useState("");
   const [opsSyncStatus, setOpsSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
 
@@ -616,56 +613,6 @@ export default function App() {
     }
   };
 
-  // Handle ARCA database CSV load (Paste/Uploader Zone)
-  const handleImportArcaCsv = () => {
-    setArcaImportError("");
-    try {
-      if (!arcaRawText.trim()) {
-        setArcaImportError("La Base de ARCA está vacía. Ingrese valores válidos.");
-        return;
-      }
-      const lines = arcaRawText.trim().split(/\r?\n/);
-      const parsed: {cuit: string, fechaAlta: string, umbral: number}[] = [];
-      
-      lines.forEach((line, idx) => {
-        // Skip header lines
-        if (idx === 0 && (line.toLowerCase().includes("cuit") || line.toLowerCase().includes("alta") || line.toLowerCase().includes("umbral"))) {
-          return;
-        }
-        // Split specifically by caret, fallback to comma/semicolon if caret not present
-        const separator = line.includes("^") ? "^" : /[,\t;]/;
-        const cols = line.split(separator).map(c => c.trim().replace(/^["']|["']$/g, ""));
-        if (cols.length < 2) return; // Ignore empty/broken rows
-        
-        const cuitVal = cols[0].replace(/\D/g, "");
-        if (!cuitVal) return;
-        const fechaVal = cols[1];
-        const umbralVal = parseFloat(cols[2] || "0") || 0;
-        
-        parsed.push({
-          cuit: cuitVal,
-          fechaAlta: fechaVal,
-          umbral: umbralVal
-        });
-      });
-
-      if (parsed.length === 0) {
-        throw new Error("Formato esperado: CUIT^FECHA_ALTA^UMBRAL");
-      }
-
-      if (selectedPresetId !== "custom") {
-        setTransactions([]);
-        setSelectedPresetId("custom");
-      }
-      setArcaRecords(parsed);
-      setArcaRawText("");
-      setArcaImportError("");
-      persistArcaRecordsToSupabase(parsed);
-    } catch (err: any) {
-      setArcaImportError(err.message || "Error al parsear la Base de Altas de ARCA.");
-    }
-  };
-
   // Handle ARCA file uploads (.xlsx, .xls, .csv)
   const handleArcaFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setArcaImportError("");
@@ -724,66 +671,6 @@ export default function App() {
     reader.readAsBinaryString(file);
     // Reset file input element
     e.target.value = "";
-  };
-
-  // Handle Operations CSV/Caret load
-  const handleImportOpsCsv = () => {
-    setOpsImportError("");
-    try {
-      if (!opsRawText.trim()) {
-        setOpsImportError("Ingrese contenido de Operaciones válido.");
-        return;
-      }
-      const lines = opsRawText.trim().split(/\r?\n/);
-      const parsed: Transaction[] = [];
-
-      lines.forEach((line, idx) => {
-        // Skip headers
-        if (idx === 0 && (line.toLowerCase().includes("monto") || line.toLowerCase().includes("fecha") || line.toLowerCase().includes("cuit") || line.toLowerCase().includes("tipo") || line.toLowerCase().includes("sentido"))) {
-          return;
-        }
-        // Split specifically by caret, fallback to comma/semicolon if caret not present
-        const separator = line.includes("^") ? "^" : /[,\t;]/;
-        const cols = line.split(separator).map(c => c.trim().replace(/^["']|["']$/g, ""));
-        if (cols.length < 5) return;
-
-        const tipoRow = cols[0].toUpperCase() === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
-        const fechaRow = cols[1];
-        const montoRow = cols[2];
-        const cuitRow = cols[3].replace(/\D/g, "");
-        const sujetoDenom = cols[4] || getArgentineFallbackName(cuitRow, "Sujeto");
-        const cuitContraRow = cols[5].replace(/\D/g, "");
-        const contraDenom = cols[6] || getArgentineFallbackName(cuitContraRow, "Contraparte");
-        const fechaAltaLookup = cuitAltaDatesMap[cuitRow] || fechaRow;
-
-        parsed.push({
-          OPERACION: "TRANSFERENCIA",
-          TIPO: tipoRow,
-          FECHA: fechaRow,
-          MONTO: montoRow,
-          CUIT: cuitRow,
-          CUIT_CONTRAPARTE: cuitContraRow,
-          FECHA_ALTA_CUIT: fechaAltaLookup,
-          DENOMINACION_SUJETO: sujetoDenom,
-          DENOMINACION_CONTRAPARTE: contraDenom
-        });
-      });
-
-      if (parsed.length === 0) {
-        throw new Error("No se detectaron transacciones consistentes.");
-      }
-
-      if (selectedPresetId !== "custom") {
-        setArcaRecords([]);
-        setSelectedPresetId("custom");
-      }
-      setTransactions(parsed);
-      setOpsRawText("");
-      setOpsImportError("");
-      persistTransactionsToSupabase(parsed);
-    } catch (err: any) {
-      setOpsImportError(err.message || "Error al cargar las operaciones.");
-    }
   };
 
   // Handle Operations File Upload (.xlsx, .xls, .csv)
@@ -1705,25 +1592,17 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Text area and parse command row */}
+                {/* File Upload (única vía de carga) */}
                 <div className="flex flex-col gap-2">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] uppercase font-bold text-zinc-500">
-                      Formato esperado (^ o Excel):
+                      Formato esperado del archivo:
                     </span>
                     <span className="text-[10px] font-mono font-bold text-zinc-400 bg-zinc-100 px-1 py-0.2 rounded border border-zinc-200">
-                      CUIT^FECHA_ALTA^UMBRAL
+                      CUIT | FECHA_ALTA | UMBRAL
                     </span>
                   </div>
-                  
-                  <textarea
-                    placeholder="30718293049^15/05/2026^5000000&#10;30658291032^12/03/2024^0"
-                    value={arcaRawText}
-                    onChange={(e) => setArcaRawText(e.target.value)}
-                    className="w-full h-24 p-2.5 font-mono text-xs border border-zinc-200 rounded bg-zinc-50 focus:bg-white focus:outline-none focus:border-zinc-900 block resize-none leading-relaxed"
-                  />
-                  
-                  {/* File Upload Trigger for ARCA */}
+
                   <input 
                     type="file" 
                     ref={arcaFileInputRef} 
@@ -1732,26 +1611,26 @@ export default function App() {
                     className="hidden" 
                   />
 
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <button
-                      onClick={handleImportArcaCsv}
-                      className="px-3.5 py-1.5 bg-zinc-950 hover:bg-zinc-850 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
-                    >
-                      <UploadCloud className="w-4 h-4 text-amber-400" />
-                      <span>Cargar Registros ARCA</span>
-                    </button>
-                    
-                    <button
-                      onClick={() => arcaFileInputRef.current?.click()}
-                      className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
-                    >
-                      <span>Subir Excel/CSV</span>
-                    </button>
+                  <button
+                    onClick={() => arcaFileInputRef.current?.click()}
+                    className="w-full px-3.5 py-2.5 bg-zinc-950 hover:bg-zinc-850 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center justify-center gap-1.5"
+                  >
+                    <UploadCloud className="w-4 h-4 text-amber-400" />
+                    <span>Subir Archivo (Excel/CSV)</span>
+                  </button>
 
-                    {arcaImportError && (
-                      <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ {arcaImportError}</span>
-                    )}
-                  </div>
+                  {arcaSyncStatus === "syncing" && (
+                    <span className="text-[10px] text-zinc-500 font-semibold shrink-0">Guardando en Supabase…</span>
+                  )}
+                  {arcaSyncStatus === "synced" && (
+                    <span className="text-[10px] text-emerald-600 font-bold shrink-0">✓ Padrón guardado en Supabase</span>
+                  )}
+                  {arcaSyncStatus === "error" && (
+                    <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ No se pudo guardar en Supabase (los datos siguen disponibles localmente)</span>
+                  )}
+                  {arcaImportError && (
+                    <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ {arcaImportError}</span>
+                  )}
                 </div>
 
                 {/* Real-time metrics output block (First/Last date reads & total) */}
@@ -1788,25 +1667,17 @@ export default function App() {
                   </span>
                 </div>
 
-                {/* Text area and parse command row */}
+                {/* File Upload (única vía de carga) */}
                 <div className="flex flex-col gap-2">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] uppercase font-bold text-zinc-500">
-                      Formato esperado (^ o Excel):
+                      Formato esperado del archivo:
                     </span>
                     <span className="text-[10px] font-mono font-bold text-zinc-400 bg-zinc-100 px-1 py-0.2 rounded border border-zinc-200">
-                      TIPO^FECHA^MONTO^CUIT^DENOM_SUJETO^CUIT_CONT^DENOM_CONT
+                      TIPO | FECHA | MONTO | CUIT | DENOM_SUJETO | CUIT_CONT | DENOM_CONT
                     </span>
                   </div>
 
-                  <textarea
-                    placeholder="RECIBIDA^01/06/2026^12500000^30718293049^Empresa San Jorge S.A.^30658291032^Distribuidora El Sol S.R.L.&#10;ORDENADA^02/06/2026^20700000^30718293049^Empresa San Jorge S.A.^30883920191^Consultores Asociados S.A."
-                    value={opsRawText}
-                    onChange={(e) => setOpsRawText(e.target.value)}
-                    className="w-full h-24 p-2.5 font-mono text-xs border border-zinc-200 rounded bg-zinc-50 focus:bg-white focus:outline-none focus:border-zinc-900 block resize-none leading-relaxed"
-                  />
-
-                  {/* File Upload Trigger for Operations */}
                   <input 
                     type="file" 
                     ref={opsFileInputRef} 
@@ -1815,33 +1686,33 @@ export default function App() {
                     className="hidden" 
                   />
 
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <button
-                      onClick={handleImportOpsCsv}
-                      className="px-3.5 py-1.5 bg-zinc-950 hover:bg-zinc-850 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
-                    >
-                      <UploadCloud className="w-4 h-4 text-zinc-300" />
-                      <span>Cargar Operaciones</span>
-                    </button>
+                  <button
+                    onClick={() => opsFileInputRef.current?.click()}
+                    className="w-full px-3.5 py-2.5 bg-zinc-950 hover:bg-zinc-850 text-white text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center justify-center gap-1.5"
+                  >
+                    <UploadCloud className="w-4 h-4 text-zinc-300" />
+                    <span>Subir Archivo (Excel/CSV)</span>
+                  </button>
 
-                    <button
-                      onClick={() => opsFileInputRef.current?.click()}
-                      className="px-3.5 py-1.5 bg-zinc-50 hover:bg-zinc-100 text-zinc-800 border border-zinc-200 text-xs font-bold rounded shadow-xs cursor-pointer transition flex items-center gap-1.5"
-                    >
-                      <span>Subir Excel/CSV</span>
-                    </button>
-
-                    {opsImportError && (
-                      <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ {opsImportError}</span>
-                    )}
-                  </div>
+                  {opsSyncStatus === "syncing" && (
+                    <span className="text-[10px] text-zinc-500 font-semibold shrink-0">Guardando en Supabase…</span>
+                  )}
+                  {opsSyncStatus === "synced" && (
+                    <span className="text-[10px] text-emerald-600 font-bold shrink-0">✓ Operaciones guardadas en Supabase</span>
+                  )}
+                  {opsSyncStatus === "error" && (
+                    <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ No se pudo guardar en Supabase (los datos siguen disponibles localmente)</span>
+                  )}
+                  {opsImportError && (
+                    <span className="text-[10px] text-rose-600 font-bold shrink-0">⚠ {opsImportError}</span>
+                  )}
                 </div>
 
                 {/* Real-time Operations total counters box */}
                 <div className="mt-1 bg-gradient-to-r from-zinc-50 to-zinc-100/50 border border-zinc-200 p-3 rounded-lg flex items-center justify-between">
                   <div>
                     <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-wider">Cantidad de Operaciones</span>
-                    <span className="text-[10.5px] text-zinc-500 font-medium">Registradas temporalmente en sandbox</span>
+                    <span className="text-[10.5px] text-zinc-500 font-medium">Sincronizadas con Supabase</span>
                   </div>
                   <div className="bg-zinc-950 text-white font-mono text-xs font-black px-4 py-1.5 rounded-md border border-zinc-800 shadow-inner">
                     {transactions.length} Totales
