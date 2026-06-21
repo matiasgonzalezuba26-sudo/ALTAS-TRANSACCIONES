@@ -279,6 +279,112 @@ app.get("/api/supabase/status", async (req, res) => {
   return res.json({ online: !error, configured: true, latencyMs });
 });
 
+// Persiste el padrón ARCA (CUIT, fecha de alta, umbral) apenas se carga en el front,
+// sin esperar a que se corra un análisis. Usa upsert por CUIT: si el sujeto ya existía,
+// actualiza su umbral/fecha de alta en vez de duplicarlo.
+app.post("/api/arca-records", async (req, res) => {
+  if (!isSupabaseConfigured || !supabaseAdmin) {
+    return res.status(503).json({ error: "Supabase no está configurado en el servidor." });
+  }
+  try {
+    const { records } = req.body as { records: { cuit: string; fechaAlta: string; umbral: number }[] };
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ error: "Se requiere un array 'records' no vacío." });
+    }
+
+    const parseFecha = (f: string) => {
+      if (!f) return null;
+      const [d, m, y] = f.split("/").map(Number);
+      if (!d || !m || !y) return null;
+      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    };
+
+    // Limpiar el padrón existente y reemplazarlo por el lote nuevo, ya que la carga
+    // de ARCA en la app representa el padrón completo vigente, no un agregado incremental.
+    const { error: deleteError } = await supabaseAdmin.from("arca_records").delete().neq("cuit", "");
+    if (deleteError) {
+      console.error("[supabase] Error limpiando arca_records previo:", deleteError);
+    }
+
+    const rows = records.map(r => ({
+      cuit: r.cuit,
+      umbral: r.umbral ?? 0,
+      denominacion: null,
+      fecha_alta: parseFecha(r.fechaAlta)
+    }));
+
+    const { data, error } = await supabaseAdmin.from("arca_records").insert(rows).select("id");
+    if (error) {
+      console.error("[supabase] Error insertando arca_records:", error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.json({ inserted: data?.length ?? 0 });
+  } catch (err: any) {
+    console.error("[supabase] Error inesperado en /api/arca-records:", err);
+    return res.status(500).json({ error: err.message || "Error guardando el padrón ARCA." });
+  }
+});
+
+// Persiste el lote de transacciones apenas se carga en el front, sin asociarlas
+// todavía a ningún análisis (analysis_id queda null hasta que se corra /api/analyze).
+app.post("/api/transactions", async (req, res) => {
+  if (!isSupabaseConfigured || !supabaseAdmin) {
+    return res.status(503).json({ error: "Supabase no está configurado en el servidor." });
+  }
+  try {
+    const { transactions } = req.body as { transactions: any[] };
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      return res.status(400).json({ error: "Se requiere un array 'transactions' no vacío." });
+    }
+
+    const parseFecha = (f: string) => {
+      if (!f) return null;
+      const [d, m, y] = f.split("/").map(Number);
+      if (!d || !m || !y) return null;
+      return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    };
+
+    // Reemplazar el lote anterior de transacciones "sueltas" (sin análisis asociado)
+    // por el lote nuevo cargado, igual criterio que con el padrón ARCA.
+    const { error: deleteError } = await supabaseAdmin.from("transactions").delete().is("analysis_id", null);
+    if (deleteError) {
+      console.error("[supabase] Error limpiando transactions previas sin análisis:", deleteError);
+    }
+
+    const rows = transactions.map(t => ({
+      analysis_id: null,
+      operacion: t.OPERACION || "TRANSFERENCIA",
+      tipo: t.TIPO,
+      fecha: parseFecha(t.FECHA),
+      monto: parseFloat(t.MONTO) || 0,
+      cuit: t.CUIT,
+      cuit_contraparte: t.CUIT_CONTRAPARTE,
+      fecha_alta_cuit: parseFecha(t.FECHA_ALTA_CUIT),
+      denominacion_sujeto: t.DENOMINACION_SUJETO || null,
+      denominacion_contraparte: t.DENOMINACION_CONTRAPARTE || null
+    }));
+
+    // Insertar en lotes para evitar límites de payload con archivos grandes (1000+ filas)
+    const batchSize = 500;
+    let totalInserted = 0;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const { data, error } = await supabaseAdmin.from("transactions").insert(batch).select("id");
+      if (error) {
+        console.error("[supabase] Error insertando lote de transactions:", error);
+        return res.status(500).json({ error: error.message, insertedSoFar: totalInserted });
+      }
+      totalInserted += data?.length ?? 0;
+    }
+
+    return res.json({ inserted: totalInserted });
+  } catch (err: any) {
+    console.error("[supabase] Error inesperado en /api/transactions:", err);
+    return res.status(500).json({ error: err.message || "Error guardando las transacciones." });
+  }
+});
+
 // Endpoint implementation
 app.post("/api/analyze", async (req, res) => {
   try {

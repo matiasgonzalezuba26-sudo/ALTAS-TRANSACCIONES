@@ -292,10 +292,12 @@ export default function App() {
   });
   const [arcaRawText, setArcaRawText] = useState("");
   const [arcaImportError, setArcaImportError] = useState("");
+  const [arcaSyncStatus, setArcaSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
 
   // Custom copy-pasting Uploader States (Base de Operaciones)
   const [opsRawText, setOpsRawText] = useState("");
   const [opsImportError, setOpsImportError] = useState("");
+  const [opsSyncStatus, setOpsSyncStatus] = useState<"idle" | "syncing" | "synced" | "error">("idle");
 
   // Show inline raw importers inside Screen 2 as secondary tools
   const [showSecondaryImporter, setShowSecondaryImporter] = useState(false);
@@ -577,6 +579,43 @@ export default function App() {
   const arcaFileInputRef = useRef<HTMLInputElement>(null);
   const opsFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Persiste el padrón ARCA recién cargado en Supabase (tabla arca_records).
+  // Reemplaza el padrón vigente completo, ya que cada carga representa el padrón
+  // actualizado, no un agregado incremental.
+  const persistArcaRecordsToSupabase = async (records: {cuit: string, fechaAlta: string, umbral: number}[]) => {
+    setArcaSyncStatus("syncing");
+    try {
+      const res = await fetch("/api/arca-records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ records })
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Error guardando el padrón ARCA.");
+      setArcaSyncStatus("synced");
+    } catch (err) {
+      console.error("[supabase] No se pudo guardar el padrón ARCA:", err);
+      setArcaSyncStatus("error");
+    }
+  };
+
+  // Persiste el lote de transacciones recién cargado en Supabase (tabla transactions),
+  // sin asociarlo todavía a un análisis. Reemplaza el lote "suelto" anterior.
+  const persistTransactionsToSupabase = async (txs: Transaction[]) => {
+    setOpsSyncStatus("syncing");
+    try {
+      const res = await fetch("/api/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactions: txs })
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Error guardando las transacciones.");
+      setOpsSyncStatus("synced");
+    } catch (err) {
+      console.error("[supabase] No se pudieron guardar las transacciones:", err);
+      setOpsSyncStatus("error");
+    }
+  };
+
   // Handle ARCA database CSV load (Paste/Uploader Zone)
   const handleImportArcaCsv = () => {
     setArcaImportError("");
@@ -621,6 +660,7 @@ export default function App() {
       setArcaRecords(parsed);
       setArcaRawText("");
       setArcaImportError("");
+      persistArcaRecordsToSupabase(parsed);
     } catch (err: any) {
       setArcaImportError(err.message || "Error al parsear la Base de Altas de ARCA.");
     }
@@ -676,6 +716,7 @@ export default function App() {
         }
         setArcaRecords(parsed);
         setArcaImportError("");
+        persistArcaRecordsToSupabase(parsed);
       } catch (err: any) {
         setArcaImportError(err.message || "Error leyendo el archivo.");
       }
@@ -739,6 +780,7 @@ export default function App() {
       setTransactions(parsed);
       setOpsRawText("");
       setOpsImportError("");
+      persistTransactionsToSupabase(parsed);
     } catch (err: any) {
       setOpsImportError(err.message || "Error al cargar las operaciones.");
     }
@@ -805,6 +847,7 @@ export default function App() {
         }
         setTransactions(parsed);
         setOpsImportError("");
+        persistTransactionsToSupabase(parsed);
       } catch (err: any) {
         setOpsImportError(err.message || "Error leyendo el archivo.");
       }
