@@ -312,11 +312,6 @@ export default function App() {
   // Explicitly selected subject under analysis (holds persistent CUIT)
   const [activeSubjectCuit, setActiveSubjectCuit] = useState<string | null>(null);
 
-  // Paso 5: Generación y Descarga Segura - State managers
-  const [isSecureDownloadModalOpen, setIsSecureDownloadModalOpen] = useState(false);
-  const [secureHtmlReport, setSecureHtmlReport] = useState("");
-  const [lastExportedStats, setLastExportedStats] = useState<{ fileName: string, fileSizeKb: number, sha256: string } | null>(null);
-  
   const [exportLogs, setExportLogs] = useState<{
     id: string;
     timestamp: string;
@@ -830,13 +825,6 @@ export default function App() {
       hashVal = hashVal & hashVal;
     }
     const signature = "SHA256-SIM-" + Math.abs(hashVal).toString(16).toUpperCase().substring(0, 8);
-    
-    setSecureHtmlReport(htmlContent);
-    setLastExportedStats({
-      fileName: `reporte_forense_LA_${analysisMonth}.html`,
-      fileSizeKb: sizeKb,
-      sha256: signature
-    });
 
     let directDownloadSucceeded = true;
     try {
@@ -849,9 +837,9 @@ export default function App() {
       document.body.removeChild(link);
       showToast("Descarga exitosa. Integridad referencial PLD y firma digital verificada.", "success");
     } catch (e) {
-      console.warn("Direct download sandbox block; showing popup fallback:", e);
+      console.warn("Direct download sandbox block:", e);
       directDownloadSucceeded = false;
-      showToast("Sandbox del navegador bloqueó descarga. Se abrió el portal para copia segura.", "info");
+      showToast("El navegador bloqueó la descarga directa. Intentá nuevamente.", "error");
     }
 
     const newLog = {
@@ -866,9 +854,6 @@ export default function App() {
     };
 
     setExportLogs(prev => [newLog, ...prev]);
-    setIsSecureDownloadModalOpen(true); // Re-enabled as requested to show the expanded modal correctly
-
-    // Legacy template bypass logic removed as dead code for enhanced optimization and compliance
   };
 
   // Helper inside tables to update single CUIT dates
@@ -2376,215 +2361,6 @@ export default function App() {
         )}
 
       </main>
-
-      {/* Paso 5: Portal de Custodia de Integridad y Descarga Segura (Modal) */}
-      {isSecureDownloadModalOpen && lastExportedStats && (
-        <div className="fixed inset-0 bg-zinc-950/85 backdrop-blur-xs flex items-center justify-center z-50 p-4 transition-all" id="secure-download-portal-modal">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-7xl xl:max-w-[1555px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            
-            {/* Header del portal */}
-            <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 px-6 py-4.5 border-b border-zinc-800 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-emerald-950/45 border border-emerald-900/60 rounded-xl">
-                  <FileCheck className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div>
-                  <h3 className="text-white text-[12.5px] uppercase font-bold tracking-widest font-sans flex items-center gap-2">
-                    Portal de Custodia de Integridad
-                  </h3>
-                  <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold">
-                    PREVENCIÓN DE LAVADO DE DINERO • PASO 5
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsSecureDownloadModalOpen(false)}
-                className="text-zinc-400 hover:text-white bg-zinc-950/30 hover:bg-zinc-950/60 border border-zinc-800 rounded-lg p-1.5 transition-all text-xs cursor-pointer font-bold uppercase font-mono"
-              >
-                CERRAR
-              </button>
-            </div>
-
-            {/* Contenido principal con scroll */}
-            <div className="p-6 overflow-y-auto flex flex-col gap-6 scrollbar-thin">
-              
-              {/* Bloque de aviso normativo */}
-              <div className="p-4 bg-zinc-950/40 rounded-xl border border-zinc-800 flex gap-3 items-start">
-                <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                <div className="text-xs text-zinc-300 leading-relaxed font-sans">
-                  <strong className="text-zinc-200">Aviso legal y gobernanza AML:</strong> Este portal emite reportes interactivos protegidos bajo firmas criptográficas simuladas para asegurar la integridad de la evidencia recabada en el proceso de debida diligencia de ARCA. Cada movimiento de exportación es auditado localmente.
-                </div>
-              </div>
-
-              {/* Ficha técnica del documento generado */}
-              <div className="flex flex-col gap-3">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 font-mono">
-                  Ficha Técnica de Custodia
-                </span>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  
-                  <div className="p-3 bg-zinc-950/30 rounded-xl border border-zinc-900 flex flex-col gap-1">
-                    <span className="text-[9px] uppercase font-semibold text-zinc-500 tracking-wider">Nombre del Reporte</span>
-                    <span className="text-xs font-bold text-white font-mono break-all leading-normal">
-                      {lastExportedStats.fileName}
-                    </span>
-                  </div>
-
-                  <div className="p-3 bg-zinc-950/30 rounded-xl border border-zinc-900 flex flex-col gap-1">
-                    <span className="text-[9px] uppercase font-semibold text-zinc-500 tracking-wider">Tamaño de Archivo</span>
-                    <span className="text-xs font-bold text-emerald-400 font-mono">
-                      {lastExportedStats.fileSizeKb} KB
-                    </span>
-                  </div>
-
-                  <div className="p-3 bg-zinc-950/30 rounded-xl border border-zinc-900 flex flex-col gap-1 col-span-1">
-                    <span className="text-[9px] uppercase font-semibold text-zinc-500 tracking-wider">Firma Digital (SHA-256)</span>
-                    <span className="text-xs font-bold text-amber-400 font-mono tracking-wider break-all">
-                      {lastExportedStats.sha256}
-                    </span>
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Controles de descarga segura y respaldo */}
-              <div className="flex flex-col gap-3">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 font-mono">
-                  Mecanismos Duales de Descarga y Copia
-                </span>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  
-                  {/* Re-intentar descarga directa */}
-                  <button
-                    onClick={() => {
-                      try {
-                        const blob = new Blob([secureHtmlReport], { type: "text/html;charset=utf-8" });
-                        const link = document.createElement("a");
-                        link.href = URL.createObjectURL(blob);
-                        link.download = lastExportedStats.fileName;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        showToast("Re-descarga exitosa. Documento exportado.", "success");
-                      } catch (err) {
-                        showToast("Descarga bloqueada en este entorno.", "error");
-                      }
-                    }}
-                    className="p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 hover:from-emerald-950 hover:to-emerald-900 rounded-xl border border-zinc-800 hover:border-emerald-800 text-white font-bold text-xs transition-all flex flex-col items-center justify-center gap-2 cursor-pointer group active:scale-97 select-none"
-                    id="redescargar-reporte-modal"
-                  >
-                    <FileCheck className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
-                    <span className="uppercase tracking-widest font-mono text-[9px]">Re-Descargar Reporte HTML</span>
-                    <span className="text-[9px] font-medium text-zinc-400 font-sans normal-case text-center">
-                      Descargar archivo local autonómo interactivo
-                    </span>
-                  </button>
-
-                  {/* Copiar HTML al portapapeles */}
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(secureHtmlReport);
-                      showToast("Código HTML copiado al portapapeles con éxito.", "success");
-                      
-                      // Registrar copia
-                      const newLog = {
-                        id: "LOG-" + (182 + exportLogs.length + 1),
-                        timestamp: new Date().toISOString().replace("T", " ").substring(0, 19) + " UTC",
-                        fileName: lastExportedStats.fileName,
-                        actionType: "CLIPBOARD_COPY" as const,
-                        fileSizeKb: lastExportedStats.fileSizeKb,
-                        sha256: lastExportedStats.sha256,
-                        officer: "M. González (Oficial PLD UBA)",
-                        status: "EXITOSO" as const
-                      };
-                      setExportLogs(prev => [newLog, ...prev]);
-                    }}
-                    className="p-4 bg-gradient-to-b from-zinc-900 to-zinc-950 hover:from-amber-950 hover:to-amber-900 rounded-xl border border-zinc-800 hover:border-amber-805 text-white font-bold text-xs transition-all flex flex-col items-center justify-center gap-2 cursor-pointer group active:scale-97 select-none"
-                    id="copiar-codigo-modal"
-                  >
-                    <Copy className="w-6 h-6 text-amber-400 group-hover:scale-110 transition-transform" />
-                    <span className="uppercase tracking-widest font-mono text-[9px]">Copiar Código al Portapapeles</span>
-                    <span className="text-[9px] font-medium text-zinc-400 font-sans normal-case text-center">
-                      Salva-vidas si el sandbox bloqueó descargas directas
-                    </span>
-                  </button>
-
-                </div>
-              </div>
-
-              {/* Bitácora / Historial de Auditoría Local */}
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
-                  <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 font-mono">
-                    Bitácora Histórica de Auditoría de Exportaciones
-                  </span>
-                  <span className="text-[9px] font-bold text-zinc-500 font-mono uppercase bg-zinc-950 px-2 py-0.5 rounded border border-zinc-850">
-                    Reglas EBR • UIF / CNBV
-                  </span>
-                </div>
-
-                <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950/20 max-h-[160px] overflow-y-auto scrollbar-thin">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-zinc-950 text-zinc-400 text-[8.5px] uppercase font-bold tracking-widest border-b border-zinc-850">
-                        <th className="px-3 py-2 text-center font-mono">ID</th>
-                        <th className="px-3 py-2">Fecha y Hora</th>
-                        <th className="px-3 py-2">Metodología / Acción</th>
-                        <th className="px-3 py-2 font-mono text-right">Tamaño</th>
-                        <th className="px-3 py-2 text-center">Estado Legal</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-900">
-                      {exportLogs.map((log) => (
-                        <tr key={log.id} className="hover:bg-zinc-900/30 text-[10px] text-zinc-300 font-sans transition-colors">
-                          <td className="px-3 py-2.5 text-center font-mono font-bold text-zinc-500">{log.id}</td>
-                          <td className="px-3 py-2.5 font-mono text-zinc-400 text-[9.5px]">{log.timestamp}</td>
-                          <td className="px-3 py-2.5">
-                            <span className="font-bold text-white block">
-                              {log.actionType === "DOWNLOAD" ? "📥 Descarga Automática" : "📋 Copia en Portapapeles"}
-                            </span>
-                            <span className="text-[8.5px] text-zinc-500 font-mono tracking-tight block">
-                              Oficial: {log.officer} • Hash: {log.sha256}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5 font-mono text-right font-bold text-zinc-400">{log.fileSizeKb} KB</td>
-                          <td className="px-3 py-2.5 text-center">
-                            <span className={`px-2 py-0.5 rounded-[5px] text-[8px] font-extrabold uppercase font-mono tracking-wider border ${
-                              log.status === "EXITOSO" 
-                                ? "bg-emerald-950/60 text-emerald-400 border-emerald-900" 
-                                : "bg-amber-950/60 text-amber-400 border-amber-900"
-                            }`}>
-                              {log.status === "EXITOSO" ? "Firmado" : "Sandbox Migrated"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Footer */}
-            <div className="bg-zinc-950/45 px-6 py-4 border-t border-zinc-800 flex items-center justify-between">
-              <span className="text-[8.5px] text-zinc-500 uppercase font-bold tracking-widest font-mono">
-                SISTEMA DE FIRMAS DIGITALES ARCA v4.2 • CUSTODIA PLD/CFT
-              </span>
-              <button
-                onClick={() => setIsSecureDownloadModalOpen(false)}
-                className="px-5 py-2 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl border border-zinc-700 transition cursor-pointer"
-                id="aceptar-modal-portal"
-              >
-                Aceptar y Continuar
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </div>
   );
