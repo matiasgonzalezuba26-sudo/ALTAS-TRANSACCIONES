@@ -54,7 +54,7 @@ if (!isSupabaseConfigured) {
 // src/server/app.ts
 import_dotenv.default.config();
 var app = (0, import_express.default)();
-app.use(import_express.default.json());
+app.use(import_express.default.json({ limit: "10mb" }));
 function getDaysDifference(date1Str, date2Str) {
   try {
     const [d1, m1, y1] = date1Str.split("/").map(Number);

@@ -8,7 +8,7 @@ dotenv.config();
 export const app = express();
 
 // Middleware for parsing JSON requests with clean boundaries
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 
 // Helper function to calculate calendar day difference
 function getDaysDifference(date1Str: string, date2Str: string): number {
