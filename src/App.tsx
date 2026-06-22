@@ -954,6 +954,62 @@ export default function App() {
     
     // We only group nodes of type "ANALIZADO"
     const analyzedSubjects = analysisResult.nodes.filter(n => n.type === "ANALIZADO");
+    const subjectIds = analyzedSubjects.map(n => n.id);
+
+    if (subjectIds.length < 2) return [];
+
+    // --- Union-Find: agrupa sujetos que comparten contraparte o se conectan directamente ---
+    // Con detección de pares (algoritmo anterior), 15 sujetos interconectados generaban
+    // hasta 89 "grupos" solapados. Con componentes conexos se genera 1 sola red real.
+
+    const parent: Record<string, string> = {};
+    subjectIds.forEach(id => { parent[id] = id; });
+
+    const find = (x: string): string => {
+      if (parent[x] !== x) parent[x] = find(parent[x]);
+      return parent[x];
+    };
+    const union = (a: string, b: string) => {
+      const ra = find(a), rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+
+    // Contrapartes de cada sujeto (excluyendo otros sujetos del padrón)
+    const subjectSet = new Set(subjectIds);
+    const counterpartsBySubject: Record<string, Set<string>> = {};
+    subjectIds.forEach(id => {
+      counterpartsBySubject[id] = new Set(
+        analysisResult.edges
+          .filter(e => e.source === id || e.target === id)
+          .map(e => e.source === id ? e.target : e.source)
+          .filter(cp => !subjectSet.has(cp))
+      );
+    });
+
+    // Unir sujetos que comparten al menos una contraparte, o que tienen edge directa
+    for (let i = 0; i < subjectIds.length; i++) {
+      for (let j = i + 1; j < subjectIds.length; j++) {
+        const subA = subjectIds[i];
+        const subB = subjectIds[j];
+        const directEdge = analysisResult.edges.some(e =>
+          (e.source === subA && e.target === subB) || (e.source === subB && e.target === subA)
+        );
+        const sharedCounterparts = [...counterpartsBySubject[subA]].filter(id => counterpartsBySubject[subB].has(id));
+        if (directEdge || sharedCounterparts.length > 0) {
+          union(subA, subB);
+        }
+      }
+    }
+
+    // Agrupar sujetos por componente (raíz del union-find)
+    const components: Record<string, string[]> = {};
+    subjectIds.forEach(id => {
+      const root = find(id);
+      if (!components[root]) components[root] = [];
+      components[root].push(id);
+    });
+
+    // Construir los grupos finales (solo los que tienen 2+ sujetos conectados)
     const groups: {
       id: string;
       name: string;
@@ -961,48 +1017,38 @@ export default function App() {
       commonCounterparts: string[];
     }[] = [];
 
-    for (let i = 0; i < analyzedSubjects.length; i++) {
-      for (let j = i + 1; j < analyzedSubjects.length; j++) {
-        const subA = analyzedSubjects[i].id;
-        const subB = analyzedSubjects[j].id;
+    Object.values(components).forEach(members => {
+      if (members.length < 2) return;
 
-        // Check if there is a direct transaction edge between them
-        const directEdge = analysisResult.edges.some(e => 
-          (e.source === subA && e.target === subB) || (e.source === subB && e.target === subA)
-        );
+      // Contrapartes compartidas: aparecen en las edges de al menos 2 sujetos del grupo
+      const cpCount: Record<string, number> = {};
+      members.forEach(subId => {
+        counterpartsBySubject[subId].forEach(cp => {
+          cpCount[cp] = (cpCount[cp] || 0) + 1;
+        });
+      });
+      const commonCounterparts = Object.entries(cpCount)
+        .filter(([, count]) => count >= 2)
+        .sort((a, b) => b[1] - a[1]) // más compartidas primero
+        .map(([cp]) => cp);
 
-        // Find counterparties that are shared in common
-        const counterpartsA = new Set<string>(
-          analysisResult.edges
-            .filter(e => e.source === subA || e.target === subA)
-            .map(e => e.source === subA ? e.target : e.source)
-            .filter(id => id !== subA && id !== subB)
-        );
+      // Nombre descriptivo del grupo
+      const names = members.map(id => {
+        const denom = cuitDenominacionesMap[id] || id;
+        return denom.split(" ")[0];
+      });
+      const groupName = members.length <= 3
+        ? names.join(" / ") + " (Red Interconectada)"
+        : `Red de ${members.length} Sujetos Interconectados`;
 
-        const counterpartsB = new Set<string>(
-          analysisResult.edges
-            .filter(e => e.source === subB || e.target === subB)
-            .map(e => e.source === subB ? e.target : e.source)
-            .filter(id => id !== subA && id !== subB)
-        );
+      groups.push({
+        id: `grupo-${members.sort().join("-")}`,
+        name: groupName,
+        subjects: members,
+        commonCounterparts
+      });
+    });
 
-        const sharedCoords = Array.from(counterpartsA).filter(id => counterpartsB.has(id));
-
-        if (directEdge || sharedCoords.length > 0) {
-          const nameA = cuitDenominacionesMap[subA] || analyzedSubjects[i].label;
-          const nameB = cuitDenominacionesMap[subB] || analyzedSubjects[j].label;
-          const firstWordA = nameA.split(" ")[0] || "Sujeto A";
-          const firstWordB = nameB.split(" ")[0] || "Sujeto B";
-
-          groups.push({
-            id: `grupo-${subA}-${subB}`,
-            name: `${firstWordA} / ${firstWordB} (Interconectados)`,
-            subjects: [subA, subB],
-            commonCounterparts: sharedCoords
-          });
-        }
-      }
-    }
     return groups;
   }, [analysisResult, cuitDenominacionesMap]);
 

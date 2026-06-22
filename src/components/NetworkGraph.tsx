@@ -136,22 +136,48 @@ export default function NetworkGraph({
     });
 
     // 2. Position Subject CUITs (Under Analysis) in the CENTER
+    // Si hay muchos sujetos (modo grupal con red grande), usa grilla en vez de columna vertical
     const centerX = width * 0.5;
     const analyzedCount = analyzedNodes.length;
-    analyzedNodes.forEach((node, idx) => {
-      const y = analyzedCount > 1
-        ? marginY + (idx * (height - marginY * 2)) / (analyzedCount - 1)
-        : height / 2;
-      positions[node.id] = {
-        id: node.id,
-        x: centerX,
-        y: y,
-        node,
-        weight: nodeVolumes[node.id] || 0,
-        isSource: false,
-        isTarget: false
-      };
-    });
+
+    if (analyzedCount <= 4) {
+      // Pocos sujetos: columna vertical centrada (comportamiento original)
+      analyzedNodes.forEach((node, idx) => {
+        const y = analyzedCount > 1
+          ? marginY + (idx * (height - marginY * 2)) / (analyzedCount - 1)
+          : height / 2;
+        positions[node.id] = {
+          id: node.id,
+          x: centerX,
+          y: y,
+          node,
+          weight: nodeVolumes[node.id] || 0,
+          isSource: false,
+          isTarget: false
+        };
+      });
+    } else {
+      // Muchos sujetos (red grupal grande): grilla 2D centrada
+      const cols = Math.ceil(Math.sqrt(analyzedCount));
+      const rows = Math.ceil(analyzedCount / cols);
+      const cellW = (width * 0.5) / (cols + 1);
+      const cellH = (height - marginY * 2) / Math.max(rows, 1);
+      const startX = centerX - (cellW * (cols - 1)) / 2;
+
+      analyzedNodes.forEach((node, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        positions[node.id] = {
+          id: node.id,
+          x: startX + col * cellW,
+          y: marginY + row * cellH + cellH / 2,
+          node,
+          weight: nodeVolumes[node.id] || 0,
+          isSource: false,
+          isTarget: false
+        };
+      });
+    }
 
     // 3. Position Destination Counterparts on the RIGHT
     const rightX = width * 0.85;

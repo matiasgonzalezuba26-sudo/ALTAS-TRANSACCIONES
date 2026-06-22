@@ -1506,38 +1506,59 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         const centerX = vbWidth * 0.5;
         const rightX = vbWidth * 0.85;
 
-        nodes.push({
-          id: commonCuit,
-          cuit: commonCuit,
-          denom: commonName,
-          isCentral: true,
-          isCommon: true,
-          color: "#3b82f6",
-          fill: "#dbeafe",
-          r: 28,
-          x: centerX,
-          y: vbHeight / 2
-        });
-
-        // Sujetos del grupo a la izquierda
-        const subjectsOnly = activeSubjects.filter(s => s !== commonCuit);
-        subjectsOnly.forEach((sub, idx) => {
-          const y = subjectsOnly.length > 1
-            ? marginY + (idx * (vbHeight - marginY * 2)) / (subjectsOnly.length - 1)
-            : vbHeight / 2;
+        // Si hay contrapartes comunes las ponemos al centro, sino omitimos ese nodo central
+        if (commonCuit && commonCuit !== "COMUN") {
           nodes.push({
-            id: sub,
-            cuit: sub,
-            denom: denoms[sub] || sub,
-            isCentral: false,
-            isSubject: true,
-            color: "#ef4444",
-            fill: "#fee2e2",
-            r: 24,
-            x: leftX,
-            y: y
+            id: commonCuit,
+            cuit: commonCuit,
+            denom: commonName,
+            isCentral: true,
+            isCommon: true,
+            color: "#3b82f6",
+            fill: "#dbeafe",
+            r: 28,
+            x: centerX,
+            y: vbHeight / 2
           });
-        });
+        }
+
+        // Sujetos del grupo: columna izquierda si hay pocos, grilla centrada si hay muchos
+        const subjectsOnly = activeSubjects.filter(s => s !== commonCuit);
+        const subCount = subjectsOnly.length;
+
+        if (subCount <= 4) {
+          // Columna izquierda
+          subjectsOnly.forEach((sub, idx) => {
+            const y = subCount > 1
+              ? marginY + (idx * (vbHeight - marginY * 2)) / (subCount - 1)
+              : vbHeight / 2;
+            nodes.push({
+              id: sub, cuit: sub, denom: denoms[sub] || sub,
+              isCentral: false, isSubject: true,
+              color: "#ef4444", fill: "#fee2e2", r: 24,
+              x: leftX, y: y
+            });
+          });
+        } else {
+          // Grilla 2D centrada (misma lógica que NetworkGraph.tsx para redes grandes)
+          const cols = Math.ceil(Math.sqrt(subCount));
+          const cellW = vbWidth * 0.55 / (cols + 1);
+          const cellH = (vbHeight - marginY * 2) / Math.max(Math.ceil(subCount / cols), 1);
+          const startX = vbWidth * 0.15;
+          const r = Math.max(10, Math.min(18, 120 / subCount)); // radio adaptativo
+
+          subjectsOnly.forEach((sub, idx) => {
+            const col = idx % cols;
+            const row = Math.floor(idx / cols);
+            nodes.push({
+              id: sub, cuit: sub, denom: denoms[sub] || sub,
+              isCentral: false, isSubject: true,
+              color: "#ef4444", fill: "#fee2e2", r: r,
+              x: startX + col * cellW,
+              y: marginY + row * cellH + cellH / 2
+            });
+          });
+        }
 
         // Otras contrapartes relacionadas (ej. segundo nivel, como una contraparte del nodo común) a la derecha
         const placedSoFar = new Set(nodes.map(n => n.id));
