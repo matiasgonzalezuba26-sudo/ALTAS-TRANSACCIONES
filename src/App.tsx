@@ -354,6 +354,7 @@ export default function App() {
   const [isSupabaseOnline, setIsSupabaseOnline] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [supabaseLatency, setSupabaseLatency] = useState<number | null>(null);
+  const [isHydrating, setIsHydrating] = useState(false);
 
   const handleTestSupabase = async () => {
     setTestingConnection(true);
@@ -370,9 +371,40 @@ export default function App() {
     }
   };
 
-  // Check connection once on mount
+  // Al montar la app: verificar conexión y rehidratar ARCA + transacciones desde Supabase
   useEffect(() => {
-    handleTestSupabase();
+    const hydrate = async () => {
+      setIsHydrating(true);
+      try {
+        const statusRes = await fetch("/api/supabase/status");
+        const statusData = await statusRes.json();
+        setIsSupabaseOnline(!!statusData.online);
+        setSupabaseLatency(typeof statusData.latencyMs === "number" ? statusData.latencyMs : null);
+
+        if (!statusData.online) return;
+
+        // Cargar padrón ARCA guardado (solo si no hay datos cargados ya en estado)
+        const arcaRes = await fetch("/api/arca-records");
+        const arcaData = await arcaRes.json();
+        if (arcaData.records?.length > 0) {
+          setArcaRecords(arcaData.records);
+          setSelectedPresetId("custom");
+        }
+
+        // Cargar transacciones guardadas (solo las sueltas, sin analysis_id)
+        const txRes = await fetch("/api/transactions");
+        const txData = await txRes.json();
+        if (txData.transactions?.length > 0) {
+          setTransactions(txData.transactions);
+          setSelectedPresetId("custom");
+        }
+      } catch (err) {
+        console.error("[supabase] Error rehidratando datos al inicio:", err);
+      } finally {
+        setIsHydrating(false);
+      }
+    };
+    hydrate();
   }, []);
 
   // Filtered transactions and arca records in the specified date range
@@ -575,6 +607,25 @@ export default function App() {
 
   const arcaFileInputRef = useRef<HTMLInputElement>(null);
   const opsFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Limpia todas las tablas en Supabase y resetea el estado local.
+  const handleClearAllData = async () => {
+    if (!window.confirm("¿Confirmar limpieza completa? Se borrarán todos los registros de Supabase (ARCA, transacciones, análisis, nodos y edges). Esta acción no se puede deshacer.")) return;
+    try {
+      const res = await fetch("/api/clear-data", { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Error limpiando las tablas.");
+      // Resetear estado local también
+      setTransactions([]);
+      setArcaRecords([]);
+      setAnalysisResult(null);
+      setSelectedPresetId("custom");
+      setArcaSyncStatus("idle");
+      setOpsSyncStatus("idle");
+      showToast("Tablas limpiadas correctamente.", "success");
+    } catch (err: any) {
+      showToast("Error limpiando las tablas: " + err.message, "error");
+    }
+  };
 
   // Persiste el padrón ARCA recién cargado en Supabase (tabla arca_records).
   // Reemplaza el padrón vigente completo, ya que cada carga representa el padrón
@@ -1426,23 +1477,32 @@ export default function App() {
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-widest leading-none">Conexión Supabase</span>
-                        <span className={`w-2 h-2 rounded-full inline-block ${testingConnection ? "bg-amber-400 animate-ping" : "bg-emerald-500 animate-pulse"}`}></span>
+                        <span className={`w-2 h-2 rounded-full inline-block ${isHydrating ? "bg-blue-400 animate-ping" : testingConnection ? "bg-amber-400 animate-ping" : "bg-emerald-500 animate-pulse"}`}></span>
                       </div>
                       <span className="text-xs font-black text-emerald-700 block mt-0.5 uppercase tracking-wide">
-                        {testingConnection ? "Verificando..." : "ONLINE / ACTIVA"}
+                        {isHydrating ? "Cargando datos..." : testingConnection ? "Verificando..." : "ONLINE / ACTIVA"}
                       </span>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <button
-                      onClick={handleTestSupabase}
-                      disabled={testingConnection}
-                      title="Probar Latencia"
-                      className="p-1.5 rounded bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 transition text-zinc-500 hover:text-zinc-800 disabled:opacity-50 cursor-pointer"
-                    >
-                      <RefreshCw className={`w-3 h-3 ${testingConnection ? "animate-spin text-amber-500" : ""}`} />
-                    </button>
-                    {!testingConnection && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={handleClearAllData}
+                        title="Limpiar todas las tablas de Supabase"
+                        className="p-1.5 rounded bg-rose-50 hover:bg-rose-100 border border-rose-200 transition text-rose-500 hover:text-rose-700 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={handleTestSupabase}
+                        disabled={testingConnection || isHydrating}
+                        title="Probar Latencia"
+                        className="p-1.5 rounded bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 transition text-zinc-500 hover:text-zinc-800 disabled:opacity-50 cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${testingConnection ? "animate-spin text-amber-500" : ""}`} />
+                      </button>
+                    </div>
+                    {!testingConnection && !isHydrating && (
                       <span className="text-[8px] font-mono font-bold text-zinc-400 block">
                         Ping: {supabaseLatency}ms
                       </span>

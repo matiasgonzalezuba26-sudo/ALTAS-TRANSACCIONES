@@ -345,6 +345,80 @@ app.post("/api/transactions", async (req, res) => {
     return res.status(500).json({ error: err.message || "Error guardando las transacciones." });
   }
 });
+app.get("/api/arca-records", async (req, res) => {
+  if (!isSupabaseConfigured || !supabaseAdmin) {
+    return res.json({ records: [] });
+  }
+  try {
+    const { data, error } = await supabaseAdmin.from("arca_records").select("cuit, umbral, fecha_alta").order("created_at", { ascending: true });
+    if (error) {
+      console.error("[supabase] Error leyendo arca_records:", error);
+      return res.status(500).json({ error: error.message });
+    }
+    const formatFecha = (iso) => {
+      if (!iso) return "";
+      const [y, m, d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    };
+    const records = (data || []).map((r) => ({
+      cuit: r.cuit,
+      fechaAlta: formatFecha(r.fecha_alta),
+      umbral: Number(r.umbral)
+    }));
+    return res.json({ records });
+  } catch (err) {
+    console.error("[supabase] Error inesperado en GET /api/arca-records:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+app.get("/api/transactions", async (req, res) => {
+  if (!isSupabaseConfigured || !supabaseAdmin) {
+    return res.json({ transactions: [] });
+  }
+  try {
+    const { data, error } = await supabaseAdmin.from("transactions").select("operacion, tipo, fecha, monto, cuit, cuit_contraparte, fecha_alta_cuit, denominacion_sujeto, denominacion_contraparte").is("analysis_id", null).order("created_at", { ascending: true });
+    if (error) {
+      console.error("[supabase] Error leyendo transactions:", error);
+      return res.status(500).json({ error: error.message });
+    }
+    const formatFecha = (iso) => {
+      if (!iso) return "";
+      const [y, m, d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    };
+    const transactions = (data || []).map((t) => ({
+      OPERACION: t.operacion || "TRANSFERENCIA",
+      TIPO: t.tipo,
+      FECHA: formatFecha(t.fecha),
+      MONTO: String(t.monto),
+      CUIT: t.cuit,
+      CUIT_CONTRAPARTE: t.cuit_contraparte,
+      FECHA_ALTA_CUIT: formatFecha(t.fecha_alta_cuit),
+      DENOMINACION_SUJETO: t.denominacion_sujeto || "",
+      DENOMINACION_CONTRAPARTE: t.denominacion_contraparte || ""
+    }));
+    return res.json({ transactions });
+  } catch (err) {
+    console.error("[supabase] Error inesperado en GET /api/transactions:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+app.delete("/api/clear-data", async (req, res) => {
+  if (!isSupabaseConfigured || !supabaseAdmin) {
+    return res.status(503).json({ error: "Supabase no est\xE1 configurado en el servidor." });
+  }
+  try {
+    await supabaseAdmin.from("aml_edges").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    await supabaseAdmin.from("aml_nodes").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    await supabaseAdmin.from("transactions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    await supabaseAdmin.from("analyses").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    await supabaseAdmin.from("arca_records").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    return res.json({ cleared: true });
+  } catch (err) {
+    console.error("[supabase] Error inesperado en DELETE /api/clear-data:", err);
+    return res.status(500).json({ error: err.message || "Error limpiando las tablas." });
+  }
+});
 app.post("/api/analyze", async (req, res) => {
   try {
     const { transactions, threshold, antiquityLimit, useAi, arcaRecords } = req.body;
