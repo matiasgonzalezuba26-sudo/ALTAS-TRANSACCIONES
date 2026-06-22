@@ -324,7 +324,7 @@ export default function App() {
     {
       id: "LOG-0182",
       timestamp: "2026-06-17 11:24:05 UTC",
-      fileName: "reporte_forense_LA_2026-05.html",
+      fileName: "Reporte_Altas_Transacciones_2026-05.html",
       actionType: "DOWNLOAD",
       fileSizeKb: 145.2,
       sha256: "SHA256-SIM-EA8290FB",
@@ -334,7 +334,7 @@ export default function App() {
     {
       id: "LOG-0181",
       timestamp: "2026-06-16 16:15:32 UTC",
-      fileName: "reporte_forense_LA_2026-04.html",
+      fileName: "Reporte_Altas_Transacciones_2026-04.html",
       actionType: "CLIPBOARD_COPY",
       fileSizeKb: 139.8,
       sha256: "SHA256-SIM-FB73909B",
@@ -812,7 +812,7 @@ export default function App() {
       const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `reporte_forense_LA_${analysisMonth}.html`;
+      link.download = `Reporte_Altas_Transacciones_${analysisMonth}.html`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -826,7 +826,7 @@ export default function App() {
     const newLog = {
       id: "LOG-" + (182 + exportLogs.length + 1),
       timestamp: new Date().toISOString().replace("T", " ").substring(0, 19) + " UTC",
-      fileName: `reporte_forense_LA_${analysisMonth}.html`,
+      fileName: `Reporte_Altas_Transacciones_${analysisMonth}.html`,
       actionType: "DOWNLOAD" as const,
       fileSizeKb: sizeKb,
       sha256: signature,
