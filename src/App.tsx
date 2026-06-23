@@ -915,11 +915,27 @@ export default function App() {
       const relatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
       const totalVolume = relatedTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
       const opCount = relatedTxs.length;
+      const altaDate = cuitAltaDatesMap[node.id] || "No especificada";
+
+      // Operaciones con fecha anterior a la fecha de alta ARCA — irregularidad fiscal:
+      // el sujeto operó antes de estar registrado en el padrón.
+      let previoAlAlta = 0;
+      if (altaDate && altaDate !== "No especificada") {
+        const [dA, mA, yA] = altaDate.split("/").map(Number);
+        const altaTimestamp = new Date(yA, mA - 1, dA).getTime();
+        previoAlAlta = relatedTxs.filter(t => {
+          const [dT, mT, yT] = (t.FECHA || "").split("/").map(Number);
+          if (!dT || !mT || !yT) return false;
+          return new Date(yT, mT - 1, dT).getTime() < altaTimestamp;
+        }).length;
+      }
+
       return {
         ...node,
         totalVolume,
         opCount,
-        altaDate: cuitAltaDatesMap[node.id] || "No especificada"
+        altaDate,
+        previoAlAlta
       };
     });
 
@@ -1674,7 +1690,15 @@ export default function App() {
  
                             {/* Alta ARCA */}
                             <td className="py-4.5 px-4 font-mono font-bold text-zinc-800 text-center whitespace-nowrap">
-                              {node.altaDate}
+                              <div className="flex flex-col items-center gap-1">
+                                <span>{node.altaDate}</span>
+                                {node.previoAlAlta > 0 && (
+                                  <span className="inline-flex items-center gap-0.5 bg-rose-100 text-rose-700 border border-rose-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wide whitespace-nowrap">
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    {node.previoAlAlta} op. previas al alta
+                                  </span>
+                                )}
+                              </div>
                             </td>
  
                             {/* Antigüedad de cuenta */}
@@ -2297,6 +2321,25 @@ export default function App() {
                                 <strong className="text-white font-mono font-bold">{selectedNode.antiquity_days} días impositivos</strong>
                               </span>
                             </div>
+
+                            {/* Irregularidad: operaciones previas al alta ARCA */}
+                            {(() => {
+                              const matchedCase = positiveCases.find(pc => pc.id === selectedNode.id);
+                              if (!matchedCase || !matchedCase.previoAlAlta || matchedCase.previoAlAlta === 0) return null;
+                              return (
+                                <div className="bg-rose-950/40 border border-rose-800/60 rounded-lg p-3">
+                                  <div className="flex items-center gap-1.5 mb-1.5">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                    <span className="text-[9px] uppercase font-extrabold text-rose-400 tracking-widest">
+                                      Irregularidad Fiscal Detectada
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-rose-200 leading-relaxed">
+                                    Se detectaron <strong className="text-white font-mono">{matchedCase.previoAlAlta} operación{matchedCase.previoAlAlta > 1 ? "es" : ""}</strong> con fecha <strong className="text-white">anterior al alta en ARCA</strong> ({valAlta}). El sujeto operó financieramente antes de estar registrado en el padrón, lo que constituye una irregularidad fiscal independiente del volumen transaccionado.
+                                  </p>
+                                </div>
+                              );
+                            })()}
 
                             {/* Forensic Cause / Rationale */}
                             <div className="mt-2">
