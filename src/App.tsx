@@ -1501,7 +1501,15 @@ export default function App() {
                     {uniqueAnalyzedCuits.length}
                   </div>
                   <div>
-                    <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-widest">Total Encontrados</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] uppercase font-extrabold text-zinc-400 block tracking-widest">Total Encontrados</span>
+                      <span className="relative group cursor-help">
+                        <Info className="w-3 h-3 text-zinc-400 hover:text-zinc-600 transition" />
+                        <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                          Total de sujetos del padrón ARCA con transacciones en el período analizado (Mes de Corte - Período de Análisis).
+                        </span>
+                      </span>
+                    </div>
                     <span className="text-sm font-bold text-zinc-800 leading-tight">Sujetos Registrados</span>
                   </div>
                 </div>
@@ -1514,7 +1522,15 @@ export default function App() {
                     {positiveCases.length}
                   </div>
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-rose-500 block tracking-widest">Casos Positivos</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] uppercase font-bold text-rose-500 block tracking-widest">Casos Positivos</span>
+                      <span className="relative group cursor-help">
+                        <Info className="w-3 h-3 text-zinc-400 hover:text-zinc-600 transition" />
+                        <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-72 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                          Sujetos con antigüedad inferior al umbral de Antigüedad ARCA seleccionado y volumen acumulado superior al umbral individual definido en el padrón. El número de días se actualiza según lo configurado en "Antigüedad ARCA".
+                        </span>
+                      </span>
+                    </div>
                     <span className="text-sm font-bold text-zinc-800 leading-tight">Alertas &lt; {antiquityLimit} Días Alta</span>
                   </div>
                 </div>
@@ -1525,7 +1541,15 @@ export default function App() {
                     $
                   </div>
                   <div>
-                    <span className="text-[9px] uppercase font-bold text-zinc-400 block tracking-widest">Volumen Total</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] uppercase font-bold text-zinc-400 block tracking-widest">Volumen Total</span>
+                      <span className="relative group cursor-help">
+                        <Info className="w-3 h-3 text-zinc-400 hover:text-zinc-600 transition" />
+                        <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-72 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                          Suma del volumen acumulado (ordenado + recibido) del universo completo de transacciones del período analizado, independientemente de si el sujeto fue alertado o no.
+                        </span>
+                      </span>
+                    </div>
                     <span className="text-sm font-bold text-zinc-900 leading-tight">
                       $ {analysisResult.summary.total_volume_processed_ars.toLocaleString("es-AR")} ARS
                     </span>
