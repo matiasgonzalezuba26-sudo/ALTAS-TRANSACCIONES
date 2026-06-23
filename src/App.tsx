@@ -1339,11 +1339,17 @@ export default function App() {
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-end">
             
-            {/* Target month selection with native Calendar containing month and year */}
+            {/* Mes de Corte (antes: Fecha del Análisis) */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-1">
                 <Calendar className="w-3.5 h-3.5 text-zinc-400" />
-                Fecha del Análisis
+                Mes de Corte
+                <span className="relative group cursor-help ml-0.5">
+                  <Info className="w-3 h-3 text-zinc-400 hover:text-zinc-600 transition" />
+                  <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                    Mes y año de referencia del análisis. Define el punto de corte final: solo se consideran transacciones y altas ocurridas hasta el último día de este mes.
+                  </span>
+                </span>
               </label>
               <input
                 type="month"
@@ -1353,11 +1359,17 @@ export default function App() {
               />
             </div>
 
-            {/* Lookback months selection */}
+            {/* Período de Análisis */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-1">
                 <Clock className="w-3.5 h-3.5 text-zinc-400" />
                 Período de Análisis
+                <span className="relative group cursor-help ml-0.5">
+                  <Info className="w-3 h-3 text-zinc-400 hover:text-zinc-600 transition" />
+                  <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                    Cantidad de meses hacia atrás desde el Mes de Corte que se consideran para acumular el volumen de transacciones de cada sujeto.
+                  </span>
+                </span>
               </label>
               <select
                 value={lookbackMonths}
@@ -1373,11 +1385,17 @@ export default function App() {
               </select>
             </div>
 
-            {/* Antiquity Days dropdown (labeled "ANTIGUEDAD") */}
+            {/* Antigüedad ARCA */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 font-sans flex items-center gap-1">
                 <Users className="w-3.5 h-3.5 text-zinc-400" />
-                ANTIGUEDAD ARCA
+                Antigüedad ARCA
+                <span className="relative group cursor-help ml-0.5">
+                  <Info className="w-3 h-3 text-zinc-400 hover:text-zinc-600 transition" />
+                  <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-72 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                    Días máximos desde la fecha de alta en el padrón ARCA hasta el Mes de Corte. Si el sujeto tiene menos días de antigüedad que este umbral y supera el volumen de corte, se detecta como caso positivo. Los sujetos con umbral de volumen igual a 0 en el padrón son excluidos del análisis.
+                  </span>
+                </span>
               </label>
               <select
                 value={antiquityMonths}
