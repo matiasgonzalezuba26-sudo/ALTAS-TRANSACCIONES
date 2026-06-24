@@ -33,9 +33,9 @@ __export(app_exports, {
   default: () => app_default
 });
 module.exports = __toCommonJS(app_exports);
-var import_express = __toESM(require("express"), 1);
+var import_express = __toESM(require("express"));
 var import_genai = require("@google/genai");
-var import_dotenv = __toESM(require("dotenv"), 1);
+var import_dotenv = __toESM(require("dotenv"));
 
 // src/lib/supabaseAdmin.ts
 var import_supabase_js = require("@supabase/supabase-js");
@@ -80,6 +80,17 @@ function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit =
           earliestTxDate: tx.FECHA,
           altaDate: tx.FECHA_ALTA_CUIT || tx.FECHA
         });
+      } else {
+        const existing = uniqueSubjects.get(tx.CUIT);
+        const [de, me, ye] = existing.earliestTxDate.split("/").map(Number);
+        const [dt, mt, yt] = (tx.FECHA || "").split("/").map(Number);
+        if (dt && mt && yt) {
+          const existingDate = new Date(ye, me - 1, de);
+          const txDate = new Date(yt, mt - 1, dt);
+          if (txDate < existingDate) {
+            uniqueSubjects.set(tx.CUIT, { ...existing, earliestTxDate: tx.FECHA });
+          }
+        }
       }
     }
     if (tx.CUIT_CONTRAPARTE) {
