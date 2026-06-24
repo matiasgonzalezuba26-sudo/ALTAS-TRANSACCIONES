@@ -1662,6 +1662,17 @@ export default function App() {
                     </p>
                   </div>
                 </div>
+
+                {/* Botón "Enriquecer con IA" — oculto hasta configurar OpenRouter */}
+                <div className="hidden">
+                  <button
+                    onClick={() => executeAnalysis(true)}
+                    disabled={positiveCases.length === 0 || loading}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold uppercase tracking-wider transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    ✦ Enriquecer con IA
+                  </button>
+                </div>
               </div>
 
               {positiveCases.length === 0 ? (
