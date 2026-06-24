@@ -34,7 +34,6 @@ __export(app_exports, {
 });
 module.exports = __toCommonJS(app_exports);
 var import_express = __toESM(require("express"));
-var import_genai = require("@google/genai");
 var import_dotenv = __toESM(require("dotenv"));
 
 // src/lib/supabaseAdmin.ts
@@ -438,91 +437,76 @@ app.post("/api/analyze", async (req, res) => {
     }
     const numericThreshold = parseFloat(threshold) || 5e6;
     const numericAntiquityLimit = parseInt(antiquityLimit, 10) || 90;
-    const hasApiKey = !!process.env.GEMINI_API_KEY;
+    const hasApiKey = !!process.env.OPENROUTER_API_KEY;
     if (useAi && hasApiKey) {
       try {
-        const ai = new import_genai.GoogleGenAI({
-          apiKey: process.env.GEMINI_API_KEY,
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build"
-            }
-          }
-        });
-        const promptContent = `
-Analiza forensemente las siguientes transacciones financieras en pesos argentinos (ARS) aplicando las reglas de prevenci\xF3n de lavado de dinero de inicio r\xE1pido (Early-Stage Risk).
+        const model = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free";
+        const prompt = `Eres un experto en prevenci\xF3n de lavado de dinero (AML). Analiza los siguientes casos positivos ya detectados por el motor local y enriquece cada uno con:
+1. Una narrativa forense en lenguaje natural (2-3 oraciones) describiendo el patr\xF3n de riesgo
+2. La tipolog\xEDa AML m\xE1s probable: "Empresa C\xE1scara", "Pitufeo", "Estructuraci\xF3n", "Triangulaci\xF3n", "Uso \xDAnico", u "Otra"
+3. Se\xF1ales adicionales que el motor de reglas no detecta (patrones entre CUITs, contrapartes compartidas, concentraci\xF3n temporal)
 
-## Par\xE1metros del Filtro:
-- UMBRAL DE CORTE GENERAL: ${numericThreshold} ARS
-- L\xCDMITE DE RANG TEMPRANO (ANTIG\xDCEDAD): ${numericAntiquityLimit} d\xEDas
-- PADR\xD3N DE ALTA ARCA (CON HISTORIAL DE UMBRAL ESPEC\xCDFICO): ${JSON.stringify(arcaRecords || [])}
+Casos positivos detectados:
+${JSON.stringify(positiveCasesPayload, null, 2)}
 
-## Lote de Transacciones:
-${JSON.stringify(transactions, null, 2)}
-
-## Instrucciones de An\xE1lisis (AML):
-1. Calcula la diferencia en d\xEDas entre la 'FECHA' de la transacci\xF3n y la 'FECHA_ALTA_CUIT' del CUIT para evaluar la antig\xFCedad.
-2. Solo se analizan (y se declaran como tipo "ANALIZADO") aquellos CUITs de sujetos que existan en el Padr\xF3n de Alta ARCA con un "umbral" asignado que sea mayor a 0. Si un sujeto no est\xE1 en el Padr\xF3n o su umbral es 0, NO lo analices, no lo incluyas como nodo "ANALIZADO" y descarta sus flujos directos de an\xE1lisis.
-3. Si la cuenta de un CUIT analizado es nueva (menos de ${numericAntiquityLimit} d\xEDas de antig\xFCedad fiscal) Y su volumen transaccionado acumulado supera su umbral espec\xEDfico, clasif\xEDcalo como de riesgo ALTO ('Empresa C\xE1scara de Uso \xDAnico'). Explica esto t\xE9cnicamente en 'suspicion_cause'.
-4. Si la antig\xFCedad fiscal es holgada o los montos no desv\xEDan, calif\xEDcalo de forma correspondiente.
-5. El sentido de la red transaccional se basa en el campo 'TIPO'. Si es ORDENADA, los fondos fluyen del CUIT analizado hacia la contracartes. Si es RECIBIDA, fluyen de la contraparte hacia el CUIT analizado.
-
-Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin marcadores de c\xF3digo adicionales ni textos introductorios:
+Responde SOLO con un JSON v\xE1lido sin markdown, con este esquema:
 {
-  "summary": {
-    "total_cuits_analyzed": <N\xFAmero entero de CUITs analizados como sujeto>,
-    "high_risk_cases_detected": <N\xFAmero entero de casos de alto riesgo temprano identificados>,
-    "total_volume_processed_ars": <Monto de todos los movimientos juntos en ARS>
-  },
-  "nodes": [
+  "enriched": [
     {
-      "id": "CUIT del sujeto o contraparte",
-      "label": "CUIT o m\xE1scara an\xF3nima (Sujeto o Contraparte)",
-      "type": "ANALIZADO" o "CONTRAPARTE",
-      "risk_level": "BAJO" o "MEDIO" o "ALTO",
-      "antiquity_days": <antig\xFCedad en d\xEDas calculada u 0 si es contraparte pura>,
-      "suspicion_cause": "Detalle t\xE9cnico descriptivo criminal\xEDstico del nivel de riesgo, fundamentando los c\xE1lculos fiscales y de umbral"
-    }
-  ],
-  "edges": [
-    {
-      "id": "e1",
-      "source": "CUIT del origen de los fondos",
-      "target": "CUIT del destino de los fondos",
-      "amount_ars": <monto de la transacci\xF3n>,
-      "date": "dd/mm/yyyy",
-      "alert_reason": "Raz\xF3n clave de la alerta"
+      "cuit": "string",
+      "narrativa": "string",
+      "tipologia": "string",
+      "senales_adicionales": ["string"]
     }
   ]
-}
-`;
-        const aiResponse = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
-          contents: promptContent,
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.1
+}`;
+        const positiveNodes = arcaRecords || [];
+        const positiveCasesPayload = transactions.reduce((acc, tx) => {
+          if (!acc.find((a) => a.cuit === tx.CUIT)) {
+            acc.push({ cuit: tx.CUIT, denominacion: tx.DENOMINACION_SUJETO, fecha_alta: tx.FECHA_ALTA_CUIT });
           }
+          return acc;
+        }, []);
+        const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://altas-transacciones.vercel.app",
+            "X-Title": "ALTAS-TRANSACCIONES AML"
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.1,
+            response_format: { type: "json_object" }
+          })
         });
-        const rawText = aiResponse.text || "";
+        if (!openRouterRes.ok) {
+          throw new Error(`OpenRouter error: ${openRouterRes.status} ${await openRouterRes.text()}`);
+        }
+        const openRouterData = await openRouterRes.json();
+        const rawText = openRouterData.choices?.[0]?.message?.content || "";
         let cleanedText = rawText.trim();
         if (cleanedText.startsWith("```")) {
           cleanedText = cleanedText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
         }
-        const parsedJson = JSON.parse(cleanedText);
+        const enrichedData = JSON.parse(cleanedText);
+        const localResult = performLocalAnalysis(transactions, numericThreshold, numericAntiquityLimit, arcaRecords);
         persistAnalysis({
           transactions,
           threshold: numericThreshold,
           antiquityLimit: numericAntiquityLimit,
           usedAi: true,
-          result: parsedJson
+          result: localResult
         });
         return res.json({
-          analysis: parsedJson,
-          engine: "Gemini-3.5-Flash AML Investigator"
+          analysis: localResult,
+          enriched: enrichedData.enriched || [],
+          engine: `OpenRouter / ${model}`
         });
       } catch (aiError) {
-        console.error("AI Analysis failed, falling back to local engine:", aiError);
+        console.error("AI enrichment failed, returning local result:", aiError);
         const localResult = performLocalAnalysis(transactions, numericThreshold, numericAntiquityLimit, arcaRecords);
         persistAnalysis({
           transactions,
@@ -533,7 +517,8 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
         });
         return res.json({
           analysis: localResult,
-          engine: "Deterministic Local Forensic Engine (V\xEDa Fallback de IA - " + aiError.message + ")"
+          enriched: [],
+          engine: "Deterministic Local Forensic Engine (Fallback \u2014 " + aiError.message + ")"
         });
       }
     } else {
