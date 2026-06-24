@@ -572,7 +572,7 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
 `;
 
         const aiResponse = await ai.models.generateContent({
-          model: "gemini-3.5-flash",
+          model: "gemini-2.0-flash",
           contents: promptContent,
           config: {
             responseMimeType: "application/json",
