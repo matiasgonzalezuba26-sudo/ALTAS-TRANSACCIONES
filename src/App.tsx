@@ -73,6 +73,23 @@ function formatDateString(d: Date): string {
   return `${day}/${month}/${year}`;
 }
 
+// Parsea un valor de MONTO tolerando formatos argentinos: "$ 1.234,56", "1234.56", "1234,56"
+// Devuelve 0 si el valor es vacío, null o no parseable, sin silenciar el error.
+function parseMonto(value: any): { amount: number; invalid: boolean } {
+  if (value === null || value === undefined || value === "") return { amount: 0, invalid: true };
+  if (typeof value === "number") return { amount: isNaN(value) ? 0 : value, invalid: isNaN(value) };
+  const str = String(value).trim();
+  if (!str) return { amount: 0, invalid: true };
+  // Eliminar símbolo $, espacios y separadores de miles (punto antes de 3 dígitos al final)
+  const cleaned = str
+    .replace(/\$/g, "")
+    .replace(/\s/g, "")
+    .replace(/\.(?=\d{3}(?:[,]|$))/g, "") // punto de miles
+    .replace(/,/g, ".");                    // coma decimal → punto
+  const result = parseFloat(cleaned);
+  return { amount: isNaN(result) ? 0 : result, invalid: isNaN(result) };
+}
+
 // Custom Spanish list joiner to support "e" instead of "y" before words starting with I-sound
 function joinSpanish(arr: string[]): string {
   if (!arr || arr.length === 0) return "";
@@ -759,6 +776,7 @@ export default function App() {
         const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
         
         const parsed: Transaction[] = [];
+        const invalidMontos: { fila: number; cuit: string; valor: string }[] = [];
         
         rows.forEach((row, idx) => {
           if (row.length < 5) return;
@@ -772,9 +790,15 @@ export default function App() {
           
           const tipoRow = String(row[0] || "").trim().toUpperCase() === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
           const fechaRow = String(row[1] || "").trim();
-          const montoRow = String(row[2] || "").trim().replace(/[^0-9.-]/g, "");
+          const rawMonto = String(row[2] || "").trim();
+          const { amount: montoAmount, invalid: montoInvalid } = parseMonto(rawMonto);
           const cuitRow = String(row[3] || "").trim().replace(/\D/g, "");
           if (!cuitRow) return;
+
+          // Registrar monto inválido para mostrar al usuario (máx 5 en UI)
+          if (montoInvalid) {
+            invalidMontos.push({ fila: idx + 1, cuit: cuitRow, valor: rawMonto || "(vacío)" });
+          }
           
           const sujetoDenom = String(row[4] || "").trim() || getArgentineFallbackName(cuitRow, "Sujeto");
           const cuitContraRow = String(row[5] || "").trim().replace(/\D/g, "");
@@ -785,7 +809,7 @@ export default function App() {
             OPERACION: "TRANSFERENCIA",
             TIPO: tipoRow,
             FECHA: fechaRow,
-            MONTO: montoRow,
+            MONTO: String(montoAmount),
             CUIT: cuitRow,
             CUIT_CONTRAPARTE: cuitContraRow,
             FECHA_ALTA_CUIT: fechaAltaLookup,
@@ -796,6 +820,21 @@ export default function App() {
 
         if (parsed.length === 0) {
           throw new Error("No se leyeron transacciones consistentes de Excel/CSV.");
+        }
+
+        // Toast de advertencia si hay montos inválidos (Opción A)
+        if (invalidMontos.length > 0) {
+          const preview = invalidMontos.slice(0, 5)
+            .map(e => `Fila ${e.fila} · CUIT ${e.cuit} · valor: "${e.valor}"`)
+            .join("
+");
+          const extra = invalidMontos.length > 5 ? `
+...y ${invalidMontos.length - 5} más.` : "";
+          showToast(
+            `⚠️ ${invalidMontos.length} monto${invalidMontos.length > 1 ? "s" : ""} inválido${invalidMontos.length > 1 ? "s" : ""} detectado${invalidMontos.length > 1 ? "s" : ""} — se registraron como $0:
+${preview}${extra}`,
+            "error"
+          );
         }
 
         if (selectedPresetId !== "custom") {
@@ -921,7 +960,7 @@ export default function App() {
       const belongsToLimit = node.antiquity_days < antiquityLimit;
       
       const relatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
-      const totalVolume = relatedTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+      const totalVolume = relatedTxs.reduce((sum, t) => sum + parseMonto(t.MONTO).amount, 0);
       
       // Look up custom umbral from arca records
       const cleanId = String(node.id).replace(/\D/g, "");
@@ -932,7 +971,7 @@ export default function App() {
       return belongsToLimit && exceeds;
     }).map(node => {
       const relatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
-      const totalVolume = relatedTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
+      const totalVolume = relatedTxs.reduce((sum, t) => sum + parseMonto(t.MONTO).amount, 0);
       const opCount = relatedTxs.length;
       // Si no hay fecha de alta en ARCA ni en transacciones, usar la fecha
       // de transacción más antigua como proxy (el sujeto tiene umbral, no se excluye).
@@ -1220,7 +1259,7 @@ export default function App() {
         .forEach(tx => {
           const contraCuit = tx.CUIT_CONTRAPARTE;
           const contraDenom = cuitDenominacionesMap[contraCuit] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(contraCuit, "Contraparte");
-          const amount = parseFloat(tx.MONTO) || 0;
+          const amount = parseMonto(tx.MONTO).amount;
           if (!recibeMap[contraCuit]) {
             recibeMap[contraCuit] = { cuit: contraCuit, denom: contraDenom, sum: 0 };
           }
@@ -1238,7 +1277,7 @@ export default function App() {
         .forEach(tx => {
           const contraCuit = tx.CUIT_CONTRAPARTE;
           const contraDenom = cuitDenominacionesMap[contraCuit] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(contraCuit, "Contraparte");
-          const amount = parseFloat(tx.MONTO) || 0;
+          const amount = parseMonto(tx.MONTO).amount;
           if (!ordenaMap[contraCuit]) {
             ordenaMap[contraCuit] = { cuit: contraCuit, denom: contraDenom, sum: 0 };
           }
@@ -1261,7 +1300,7 @@ export default function App() {
       const internasMap: Record<string, { senderCuit: string; senderDenom: string; receiverCuit: string; receiverDenom: string; sum: number }> = {};
 
       filteredTransactions.forEach(tx => {
-        const amount = parseFloat(tx.MONTO) || 0;
+        const amount = parseMonto(tx.MONTO).amount;
 
         // Determine actual source sender and recipient receiver in this flow
         const sender = tx.TIPO === "RECIBIDA" ? tx.CUIT_CONTRAPARTE : tx.CUIT;
@@ -1344,7 +1383,7 @@ export default function App() {
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${toast.type === "success" ? "bg-emerald-400" : toast.type === "error" ? "bg-rose-400" : "bg-amber-400"}`}></span>
               <span className={`relative inline-flex rounded-full h-2 w-2 ${toast.type === "success" ? "bg-emerald-500" : toast.type === "error" ? "bg-rose-500" : "bg-amber-500"}`}></span>
             </span>
-            <span>{toast.text}</span>
+            <span className="whitespace-pre-line leading-relaxed">{toast.text}</span>
           </div>
         )}
 
@@ -2321,12 +2360,12 @@ export default function App() {
                         let displayText = selectedNode.suspicion_cause;
                         const nodeRecibidoAmount = filteredTransactions
                           .filter(t => t.CUIT === selectedNode.id && t.TIPO === "RECIBIDA")
-                          .reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+                          .reduce((sum, t) => sum + (parseMonto(t.MONTO).amount), 0);
                         const nodeRecibidoMiles = Math.round(nodeRecibidoAmount / 1000).toLocaleString("es-AR");
 
                         const nodeOrdenadoAmount = filteredTransactions
                           .filter(t => t.CUIT === selectedNode.id && t.TIPO === "ORDENADA")
-                          .reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+                          .reduce((sum, t) => sum + (parseMonto(t.MONTO).amount), 0);
                         const nodeOrdenadoMiles = Math.round(nodeOrdenadoAmount / 1000).toLocaleString("es-AR");
 
                         const nodeAcumuladoAmount = nodeRecibidoAmount + nodeOrdenadoAmount;
