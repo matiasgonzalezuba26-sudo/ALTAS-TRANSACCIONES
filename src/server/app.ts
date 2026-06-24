@@ -1,5 +1,5 @@
 import express from "express";
-import { GoogleGenAI, Type } from "@google/genai";
+// OpenRouter: no SDK needed, uses native fetch
 import dotenv from "dotenv";
 import { supabaseAdmin, isSupabaseConfigured } from "../lib/supabaseAdmin";
 
@@ -510,104 +510,98 @@ app.post("/api/analyze", async (req, res) => {
     const numericAntiquityLimit = parseInt(antiquityLimit, 10) || 90;
 
     // Check if the user opted for AI analysis and if the key exists
-    const hasApiKey = !!process.env.GEMINI_API_KEY;
+    const hasApiKey = !!process.env.OPENROUTER_API_KEY;
 
     if (useAi && hasApiKey) {
       try {
-        const ai = new GoogleGenAI({
-          apiKey: process.env.GEMINI_API_KEY,
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build",
-            },
-          },
-        });
+        // ── OpenRouter API (drop-in para cualquier modelo LLM) ──────────────
+        // Para cambiar de modelo, solo modificar OPENROUTER_MODEL en las variables
+        // de entorno de Vercel. Modelos gratuitos disponibles en openrouter.ai/models
+        // Ejemplos:
+        //   "meta-llama/llama-3.1-8b-instruct:free"   ← gratuito
+        //   "google/gemma-2-9b-it:free"                ← gratuito
+        //   "openai/gpt-4o-mini"                       ← pago, alta calidad
+        //   "anthropic/claude-3-haiku"                 ← pago, alta calidad
+        const model = process.env.OPENROUTER_MODEL || "meta-llama/llama-3.1-8b-instruct:free";
 
-        const promptContent = `
-Analiza forensemente las siguientes transacciones financieras en pesos argentinos (ARS) aplicando las reglas de prevención de lavado de dinero de inicio rápido (Early-Stage Risk).
+        const prompt = `Eres un experto en prevención de lavado de dinero (AML). Analiza los siguientes casos positivos ya detectados por el motor local y enriquece cada uno con:
+1. Una narrativa forense en lenguaje natural (2-3 oraciones) describiendo el patrón de riesgo
+2. La tipología AML más probable: "Empresa Cáscara", "Pitufeo", "Estructuración", "Triangulación", "Uso Único", u "Otra"
+3. Señales adicionales que el motor de reglas no detecta (patrones entre CUITs, contrapartes compartidas, concentración temporal)
 
-## Parámetros del Filtro:
-- UMBRAL DE CORTE GENERAL: ${numericThreshold} ARS
-- LÍMITE DE RANG TEMPRANO (ANTIGÜEDAD): ${numericAntiquityLimit} días
-- PADRÓN DE ALTA ARCA (CON HISTORIAL DE UMBRAL ESPECÍFICO): ${JSON.stringify(arcaRecords || [])}
+Casos positivos detectados:
+${JSON.stringify(positiveCasesPayload, null, 2)}
 
-## Lote de Transacciones:
-${JSON.stringify(transactions, null, 2)}
-
-## Instrucciones de Análisis (AML):
-1. Calcula la diferencia en días entre la 'FECHA' de la transacción y la 'FECHA_ALTA_CUIT' del CUIT para evaluar la antigüedad.
-2. Solo se analizan (y se declaran como tipo "ANALIZADO") aquellos CUITs de sujetos que existan en el Padrón de Alta ARCA con un "umbral" asignado que sea mayor a 0. Si un sujeto no está en el Padrón o su umbral es 0, NO lo analices, no lo incluyas como nodo "ANALIZADO" y descarta sus flujos directos de análisis.
-3. Si la cuenta de un CUIT analizado es nueva (menos de ${numericAntiquityLimit} días de antigüedad fiscal) Y su volumen transaccionado acumulado supera su umbral específico, clasifícalo como de riesgo ALTO ('Empresa Cáscara de Uso Único'). Explica esto técnicamente en 'suspicion_cause'.
-4. Si la antigüedad fiscal es holgada o los montos no desvían, califícalo de forma correspondiente.
-5. El sentido de la red transaccional se basa en el campo 'TIPO'. Si es ORDENADA, los fondos fluyen del CUIT analizado hacia la contracartes. Si es RECIBIDA, fluyen de la contraparte hacia el CUIT analizado.
-
-Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin marcadores de código adicionales ni textos introductorios:
+Responde SOLO con un JSON válido sin markdown, con este esquema:
 {
-  "summary": {
-    "total_cuits_analyzed": <Número entero de CUITs analizados como sujeto>,
-    "high_risk_cases_detected": <Número entero de casos de alto riesgo temprano identificados>,
-    "total_volume_processed_ars": <Monto de todos los movimientos juntos en ARS>
-  },
-  "nodes": [
+  "enriched": [
     {
-      "id": "CUIT del sujeto o contraparte",
-      "label": "CUIT o máscara anónima (Sujeto o Contraparte)",
-      "type": "ANALIZADO" o "CONTRAPARTE",
-      "risk_level": "BAJO" o "MEDIO" o "ALTO",
-      "antiquity_days": <antigüedad en días calculada u 0 si es contraparte pura>,
-      "suspicion_cause": "Detalle técnico descriptivo criminalístico del nivel de riesgo, fundamentando los cálculos fiscales y de umbral"
-    }
-  ],
-  "edges": [
-    {
-      "id": "e1",
-      "source": "CUIT del origen de los fondos",
-      "target": "CUIT del destino de los fondos",
-      "amount_ars": <monto de la transacción>,
-      "date": "dd/mm/yyyy",
-      "alert_reason": "Razón clave de la alerta"
+      "cuit": "string",
+      "narrativa": "string",
+      "tipologia": "string",
+      "senales_adicionales": ["string"]
     }
   ]
-}
-`;
+}`;
 
-        const aiResponse = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
-          contents: promptContent,
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.1,
+        const positiveNodes = (arcaRecords || []);
+        const positiveCasesPayload = transactions
+          .reduce((acc: any[], tx: any) => {
+            if (!acc.find((a: any) => a.cuit === tx.CUIT)) {
+              acc.push({ cuit: tx.CUIT, denominacion: tx.DENOMINACION_SUJETO, fecha_alta: tx.FECHA_ALTA_CUIT });
+            }
+            return acc;
+          }, []);
+
+        const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://altas-transacciones.vercel.app",
+            "X-Title": "ALTAS-TRANSACCIONES AML"
           },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.1,
+            response_format: { type: "json_object" }
+          })
         });
 
-        const rawText = aiResponse.text || "";
-        
-        // Clean markdown backticks if returned
+        if (!openRouterRes.ok) {
+          throw new Error(`OpenRouter error: ${openRouterRes.status} ${await openRouterRes.text()}`);
+        }
+
+        const openRouterData = await openRouterRes.json();
+        const rawText = openRouterData.choices?.[0]?.message?.content || "";
+
         let cleanedText = rawText.trim();
         if (cleanedText.startsWith("```")) {
           cleanedText = cleanedText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
         }
 
-        const parsedJson = JSON.parse(cleanedText);
+        const enrichedData = JSON.parse(cleanedText);
 
-        // Persist asynchronously without blocking the response
+        // Correr igualmente el motor local para tener el resultado base completo
+        const localResult = performLocalAnalysis(transactions, numericThreshold, numericAntiquityLimit, arcaRecords);
+
         persistAnalysis({
           transactions,
           threshold: numericThreshold,
           antiquityLimit: numericAntiquityLimit,
           usedAi: true,
-          result: parsedJson
+          result: localResult
         });
 
-        // Return analytical workspace result
         return res.json({
-          analysis: parsedJson,
-          engine: "Gemini-3.5-Flash AML Investigator"
+          analysis: localResult,
+          enriched: enrichedData.enriched || [],
+          engine: `OpenRouter / ${model}`
         });
 
       } catch (aiError: any) {
-        console.error("AI Analysis failed, falling back to local engine:", aiError);
-        // Fallback to local engine immediately on API failure
+        console.error("AI enrichment failed, returning local result:", aiError);
         const localResult = performLocalAnalysis(transactions, numericThreshold, numericAntiquityLimit, arcaRecords);
 
         persistAnalysis({
@@ -620,7 +614,8 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
 
         return res.json({
           analysis: localResult,
-          engine: "Deterministic Local Forensic Engine (Vía Fallback de IA - " + aiError.message + ")"
+          enriched: [],
+          engine: "Deterministic Local Forensic Engine (Fallback — " + aiError.message + ")"
         });
       }
     } else {
