@@ -10,6 +10,20 @@ export const app = express();
 // Middleware for parsing JSON requests with clean boundaries
 app.use(express.json({ limit: "10mb" }));
 
+// Parsea MONTO tolerando formatos argentinos y valores nulos; devuelve 0 si inválido
+function parseMonto(value: any): number {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
+  const str = String(value).trim();
+  const cleaned = str
+    .replace(/\$/g, "")
+    .replace(/\s/g, "")
+    .replace(/\.(?=\d{3}(?:[,]|$))/g, "")
+    .replace(/,/g, ".");
+  const result = parseFloat(cleaned);
+  return isNaN(result) ? 0 : result;
+}
+
 // Helper function to calculate calendar day difference
 function getDaysDifference(date1Str: string, date2Str: string): number {
   try {
@@ -32,7 +46,7 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
 
   // Process and gather information
   transactions.forEach(tx => {
-    const amount = parseFloat(tx.MONTO) || 0;
+    const amount = parseMonto(tx.MONTO);
     totalVolume += amount;
 
     if (tx.CUIT) {
@@ -71,8 +85,8 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
 
     // Calculate aggregated amounts or picos
     const cuitTxs = transactions.filter(t => t.CUIT === cuit);
-    const maxSingleMonto = Math.max(...cuitTxs.map(t => parseFloat(t.MONTO) || 0), 0);
-    const totalCuitVolume = cuitTxs.reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+    const maxSingleMonto = Math.max(...cuitTxs.map(t => parseMonto(t.MONTO)), 0);
+    const totalCuitVolume = cuitTxs.reduce((sum, t) => sum + (parseMonto(t.MONTO)), 0);
 
     // Look up custom umbral from arca records
     const cleanCuitStr = String(cuit).replace(/\D/g, "");
@@ -149,7 +163,7 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
 
   // Build edges
   transactions.forEach((tx, i) => {
-    const amount = parseFloat(tx.MONTO) || 0;
+    const amount = parseMonto(tx.MONTO);
     const isTransgressor = amount > thresholdPrice;
     
     // Check subject's antiquity for this transaction
@@ -238,7 +252,7 @@ async function persistAnalysis(params: {
         operacion: t.OPERACION || "TRANSFERENCIA",
         tipo: t.TIPO,
         fecha: parseFecha(t.FECHA),
-        monto: parseFloat(t.MONTO) || 0,
+        monto: parseMonto(t.MONTO),
         cuit: t.CUIT,
         cuit_contraparte: t.CUIT_CONTRAPARTE,
         fecha_alta_cuit: parseFecha(t.FECHA_ALTA_CUIT),
@@ -369,7 +383,7 @@ app.post("/api/transactions", async (req, res) => {
       operacion: t.OPERACION || "TRANSFERENCIA",
       tipo: t.TIPO,
       fecha: parseFecha(t.FECHA),
-      monto: parseFloat(t.MONTO) || 0,
+      monto: parseMonto(t.MONTO),
       cuit: t.CUIT,
       cuit_contraparte: t.CUIT_CONTRAPARTE,
       fecha_alta_cuit: parseFecha(t.FECHA_ALTA_CUIT),
