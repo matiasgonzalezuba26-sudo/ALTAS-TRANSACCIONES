@@ -1919,7 +1919,7 @@ export default function App() {
               <span className="text-base text-zinc-400">ℹ</span>
               <div>
                 <p className="font-semibold text-zinc-650">¿Qué son los casos positivos de inicio rápido?</p>
-                <p className="font-normal mt-0.5">Aquellos contribuyentes recientemente incorporados en el padrón ARCA que inmediatamente canalizan volúmenes de fondos anormales superando el umbral de corte, una tipología estándar de atomizadores o de instrumental instrumental usado en evasión de lavado de dinero.</p>
+                <p className="font-normal mt-0.5">Aquellos contribuyentes recientemente incorporados en el padrón ARCA que inmediatamente canalizan volúmenes de fondos anormales superando el umbral de corte, atomización usada para el lavado de dinero.</p>
               </div>
             </div>
 
