@@ -521,12 +521,17 @@ export default function App() {
     // Start with transaction defaults
     transactions.forEach(tx => {
       if (tx.CUIT) {
-        map[tx.CUIT] = tx.FECHA_ALTA_CUIT || tx.FECHA || "14/06/2026";
+        // Solo guardar si tiene fecha válida; sin hardcodear fallback
+        if (tx.FECHA_ALTA_CUIT) {
+          map[tx.CUIT] = tx.FECHA_ALTA_CUIT;
+        }
       }
     });
-    // Override directly from explicitly registered ARCA records
+    // Override con ARCA (fuente autoritativa); si fechaAlta está vacía queda sin entrada
     arcaRecords.forEach(r => {
-      map[r.cuit] = r.fechaAlta;
+      if (r.fechaAlta) {
+        map[r.cuit] = r.fechaAlta;
+      }
     });
     return map;
   }, [transactions, arcaRecords]);
@@ -929,7 +934,18 @@ export default function App() {
       const relatedTxs = filteredTransactions.filter(t => t.CUIT === node.id);
       const totalVolume = relatedTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
       const opCount = relatedTxs.length;
-      const altaDate = cuitAltaDatesMap[node.id] || "No especificada";
+      // Si no hay fecha de alta en ARCA ni en transacciones, usar la fecha
+      // de transacción más antigua como proxy (el sujeto tiene umbral, no se excluye).
+      const rawAltaDate = cuitAltaDatesMap[node.id] || null;
+      const relatedTxsSorted = [...filteredTransactions.filter(t => t.CUIT === node.id)]
+        .sort((a, b) => {
+          const [da, ma, ya] = (a.FECHA || "").split("/").map(Number);
+          const [db, mb, yb] = (b.FECHA || "").split("/").map(Number);
+          return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
+        });
+      const earliestTxFecha = relatedTxsSorted[0]?.FECHA || null;
+      const altaDate = rawAltaDate || earliestTxFecha || "No especificada";
+      const sinFechaInformada = !rawAltaDate;
 
       // Operaciones con fecha anterior a la fecha de alta ARCA — irregularidad fiscal:
       // el sujeto operó antes de estar registrado en el padrón.
@@ -949,6 +965,7 @@ export default function App() {
         totalVolume,
         opCount,
         altaDate,
+        sinFechaInformada,
         previoAlAlta
       };
     });
@@ -1715,7 +1732,14 @@ export default function App() {
                             {/* Alta ARCA */}
                             <td className="py-4.5 px-4 font-mono font-bold text-zinc-800 text-center whitespace-nowrap">
                               <div className="flex flex-col items-center gap-1">
-                                <span>{node.altaDate}</span>
+                                {node.sinFechaInformada ? (
+                                  <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wide whitespace-nowrap">
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    Sin fecha informada
+                                  </span>
+                                ) : (
+                                  <span>{node.altaDate}</span>
+                                )}
                                 {node.previoAlAlta > 0 && (
                                   <span className="inline-flex items-center gap-0.5 bg-rose-100 text-rose-700 border border-rose-300 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wide whitespace-nowrap">
                                     <AlertTriangle className="w-2.5 h-2.5" />
