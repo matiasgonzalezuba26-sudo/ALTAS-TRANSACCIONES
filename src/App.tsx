@@ -268,7 +268,15 @@ export default function App() {
   const [threshold, setThreshold] = useState<number>(35000000); // 35,000,000 to match Case A (caso-grupal-compartido)
   const [antiquityMonths, setAntiquityMonths] = useState<number>(3);
   const antiquityLimit = useMemo(() => antiquityMonths * 30, [antiquityMonths]);
-  const [analysisMonth, setAnalysisMonth] = useState<string>("2026-06");
+  const [analysisMonth, setAnalysisMonth] = useState<string>(() => {
+    const saved = localStorage.getItem("aml_analysisMonth");
+    if (saved) return saved;
+    const now = new Date();
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const y = lastMonth.getFullYear();
+    const m = String(lastMonth.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}`;
+  });
   const [lookbackMonths, setLookbackMonths] = useState<number>(3);
 
   // Loaded scenarios state
@@ -1370,7 +1378,7 @@ export default function App() {
               <input
                 type="month"
                 value={analysisMonth}
-                onChange={(e) => setAnalysisMonth(e.target.value)}
+                onChange={(e) => { setAnalysisMonth(e.target.value); localStorage.setItem("aml_analysisMonth", e.target.value); }}
                 className="w-full bg-zinc-50 text-zinc-900 border border-zinc-200 rounded-lg px-3 py-2 text-xs font-bold focus:outline-none focus:border-zinc-900 cursor-pointer transition-colors shadow-2xs"
               />
             </div>
