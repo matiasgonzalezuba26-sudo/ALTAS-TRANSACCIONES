@@ -1547,7 +1547,7 @@ export default function App() {
                         </span>
                       </span>
                     </div>
-                    <span className="text-sm font-bold text-zinc-800 leading-tight">Alertas &lt; {antiquityLimit} Días Alta</span>
+                    <span className="text-sm font-bold text-zinc-800 leading-tight">Alertas &lt; {antiquityLimit} Días 1ª Op.</span>
                   </div>
                 </div>
 
@@ -1627,7 +1627,7 @@ export default function App() {
                       RESUMEN: CASOS POSITIVOS
                     </h3>
                     <p className="text-[11px] text-zinc-400 mt-0.5 font-medium leading-relaxed">
-                      Sujetos detectados con menos de {antiquityLimit} días de antigüedad en padrón y volumen superior al umbral de corte.
+                      Sujetos con primera operación detectada hace menos de {antiquityLimit} días y volumen superior al umbral de corte.
                     </p>
                   </div>
                 </div>
@@ -1650,7 +1650,17 @@ export default function App() {
                         <th className="py-3 px-4 whitespace-nowrap">CUIT</th>
                         <th className="py-3 px-4">Denominación</th>
                         <th className="py-3 px-4 text-center whitespace-nowrap">Alta ARCA</th>
-                        <th className="py-3 px-4 text-center whitespace-nowrap">Antigüedad</th>
+                        <th className="py-3 px-4 text-center whitespace-nowrap">
+                          <span className="flex items-center justify-center gap-1">
+                            Primera Operación
+                            <span className="relative group cursor-help">
+                              <Info className="w-3 h-3 text-rose-300 hover:text-rose-100 transition" />
+                              <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                                Días transcurridos desde la primera transacción detectada del sujeto en el período analizado hasta el Mes de Corte. Valores bajos indican actividad financiera muy reciente — principal indicador de riesgo AML junto con el volumen acumulado.
+                              </span>
+                            </span>
+                          </span>
+                        </th>
                         <th className="py-3 px-4 text-right whitespace-nowrap">Volumen Total</th>
                         <th className="py-3 px-3 text-center whitespace-nowrap">Operaciones</th>
                         <th className="py-3 px-4 text-right whitespace-nowrap">Umbral</th>
@@ -1701,7 +1711,7 @@ export default function App() {
                               </div>
                             </td>
  
-                            {/* Antigüedad de cuenta */}
+                            {/* Primera Operación detectada */}
                             <td className="py-4.5 px-4 font-mono font-black text-rose-600 text-center text-xs whitespace-nowrap">
                               {node.antiquity_days} días
                             </td>
@@ -2278,7 +2288,7 @@ export default function App() {
                         const activeThreshold = matchingArca && matchingArca.umbral !== undefined ? matchingArca.umbral : threshold;
                         const activeThresholdMiles = Math.round(activeThreshold / 1000).toLocaleString("es-AR");
 
-                        displayText = `Inscripción en ARCA hace ${selectedNode.antiquity_days} días. Registra un total de $ ${nodeRecibidoMiles} miles de fondos recibidos y $ ${nodeOrdenadoMiles} miles de fondos ordenados, volumen acumulado $ ${nodeAcumuladoMiles} miles, superando el umbral de corte acumulado de $ ${activeThresholdMiles} miles.`;
+                        displayText = `Primera operación detectada hace ${selectedNode.antiquity_days} días. Registra un total de $ ${nodeRecibidoMiles} miles de fondos recibidos y $ ${nodeOrdenadoMiles} miles de fondos ordenados, volumen acumulado $ ${nodeAcumuladoMiles} miles, superando el umbral de corte acumulado de $ ${activeThresholdMiles} miles.`;
 
                         return (
                           <div className="flex flex-col gap-4">
@@ -2315,10 +2325,10 @@ export default function App() {
                             {/* Computed Metrics */}
                             <div>
                               <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
-                                Antigüedad Fiscal Detectada
+                                Primera Operación Detectada
                               </span>
                               <span className="text-xs font-medium text-zinc-300 mt-0.5 block">
-                                <strong className="text-white font-mono font-bold">{selectedNode.antiquity_days} días impositivos</strong>
+                                <strong className="text-white font-mono font-bold">{selectedNode.antiquity_days} días desde 1ª transacción</strong>
                               </span>
                             </div>
 
