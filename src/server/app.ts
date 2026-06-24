@@ -41,6 +41,18 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
           earliestTxDate: tx.FECHA,
           altaDate: tx.FECHA_ALTA_CUIT || tx.FECHA
         });
+      } else {
+        // Actualizar earliestTxDate si esta transacción es más antigua que la guardada
+        const existing = uniqueSubjects.get(tx.CUIT)!;
+        const [de, me, ye] = existing.earliestTxDate.split("/").map(Number);
+        const [dt, mt, yt] = (tx.FECHA || "").split("/").map(Number);
+        if (dt && mt && yt) {
+          const existingDate = new Date(ye, me - 1, de);
+          const txDate = new Date(yt, mt - 1, dt);
+          if (txDate < existingDate) {
+            uniqueSubjects.set(tx.CUIT, { ...existing, earliestTxDate: tx.FECHA });
+          }
+        }
       }
     }
     if (tx.CUIT_CONTRAPARTE) {
@@ -640,3 +652,4 @@ Genera una respuesta JSON estrictamente alineada con este esquema exacto, sin ma
 // funciones serverless de Node. Esto permite reusar exactamente la misma
 // app tanto en local (server.ts -> app.listen) como en Vercel (api/index.js).
 export default app;
+
