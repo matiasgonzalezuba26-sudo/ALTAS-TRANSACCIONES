@@ -1547,7 +1547,7 @@ export default function App() {
                         </span>
                       </span>
                     </div>
-                    <span className="text-sm font-bold text-zinc-800 leading-tight">Alertas &lt; {antiquityLimit} Días 1ª Op.</span>
+                    <span className="text-sm font-bold text-zinc-800 leading-tight">Alertas &lt; {antiquityLimit} Días</span>
                   </div>
                 </div>
 
@@ -1627,7 +1627,7 @@ export default function App() {
                       RESUMEN: CASOS POSITIVOS
                     </h3>
                     <p className="text-[11px] text-zinc-400 mt-0.5 font-medium leading-relaxed">
-                      Sujetos con primera operación detectada hace menos de {antiquityLimit} días y volumen superior al umbral de corte.
+                      Sujetos con antigüedad inferior a {antiquityLimit} días y volumen superior al umbral de corte.
                     </p>
                   </div>
                 </div>
@@ -1652,9 +1652,9 @@ export default function App() {
                         <th className="py-3 px-4 text-center whitespace-nowrap">Alta ARCA</th>
                         <th className="py-3 px-4 text-center whitespace-nowrap">
                           <span className="flex items-center justify-center gap-1">
-                            Primera Operación
+                            Antigüedad
                             <span className="relative group cursor-help">
-                              <Info className="w-3 h-3 text-rose-300 hover:text-rose-100 transition" />
+                              <Info className="w-3 h-3 text-rose-400 hover:text-rose-200 transition" />
                               <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
                                 Días transcurridos desde la primera transacción detectada del sujeto en el período analizado hasta el Mes de Corte. Valores bajos indican actividad financiera muy reciente — principal indicador de riesgo AML junto con el volumen acumulado.
                               </span>
@@ -2480,3 +2480,4 @@ export default function App() {
     </div>
   );
 }
+
