@@ -54,6 +54,14 @@ if (!isSupabaseConfigured) {
 import_dotenv.default.config();
 var app = (0, import_express.default)();
 app.use(import_express.default.json({ limit: "10mb" }));
+function parseMonto(value) {
+  if (value === null || value === void 0 || value === "") return 0;
+  if (typeof value === "number") return isNaN(value) ? 0 : value;
+  const str = String(value).trim();
+  const cleaned = str.replace(/\$/g, "").replace(/\s/g, "").replace(/\.(?=\d{3}(?:[,]|$))/g, "").replace(/,/g, ".");
+  const result = parseFloat(cleaned);
+  return isNaN(result) ? 0 : result;
+}
 function getDaysDifference(date1Str, date2Str) {
   try {
     const [d1, m1, y1] = date1Str.split("/").map(Number);
@@ -71,7 +79,7 @@ function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit =
   const counterparties = /* @__PURE__ */ new Set();
   let totalVolume = 0;
   transactions.forEach((tx) => {
-    const amount = parseFloat(tx.MONTO) || 0;
+    const amount = parseMonto(tx.MONTO);
     totalVolume += amount;
     if (tx.CUIT) {
       if (!uniqueSubjects.has(tx.CUIT)) {
@@ -103,8 +111,8 @@ function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit =
     const antiquity = getDaysDifference(info.altaDate, info.earliestTxDate);
     const isNewcomer = antiquity < antiquityDaysLimit;
     const cuitTxs = transactions.filter((t) => t.CUIT === cuit);
-    const maxSingleMonto = Math.max(...cuitTxs.map((t) => parseFloat(t.MONTO) || 0), 0);
-    const totalCuitVolume = cuitTxs.reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
+    const maxSingleMonto = Math.max(...cuitTxs.map((t) => parseMonto(t.MONTO)), 0);
+    const totalCuitVolume = cuitTxs.reduce((sum, t) => sum + parseMonto(t.MONTO), 0);
     const cleanCuitStr = String(cuit).replace(/\D/g, "");
     const matchingArca = arcaRecords ? arcaRecords.find((r) => String(r.cuit).replace(/\D/g, "") === cleanCuitStr) : null;
     if (!matchingArca || !matchingArca.umbral || matchingArca.umbral <= 0) {
@@ -161,7 +169,7 @@ function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit =
     }
   });
   transactions.forEach((tx, i) => {
-    const amount = parseFloat(tx.MONTO) || 0;
+    const amount = parseMonto(tx.MONTO);
     const isTransgressor = amount > thresholdPrice;
     const subjectAlta = tx.FECHA_ALTA_CUIT || tx.FECHA;
     const txAntiquity = getDaysDifference(subjectAlta, tx.FECHA);
@@ -223,7 +231,7 @@ async function persistAnalysis(params) {
         operacion: t.OPERACION || "TRANSFERENCIA",
         tipo: t.TIPO,
         fecha: parseFecha(t.FECHA),
-        monto: parseFloat(t.MONTO) || 0,
+        monto: parseMonto(t.MONTO),
         cuit: t.CUIT,
         cuit_contraparte: t.CUIT_CONTRAPARTE,
         fecha_alta_cuit: parseFecha(t.FECHA_ALTA_CUIT),
@@ -331,7 +339,7 @@ app.post("/api/transactions", async (req, res) => {
       operacion: t.OPERACION || "TRANSFERENCIA",
       tipo: t.TIPO,
       fecha: parseFecha(t.FECHA),
-      monto: parseFloat(t.MONTO) || 0,
+      monto: parseMonto(t.MONTO),
       cuit: t.CUIT,
       cuit_contraparte: t.CUIT_CONTRAPARTE,
       fecha_alta_cuit: parseFecha(t.FECHA_ALTA_CUIT),
