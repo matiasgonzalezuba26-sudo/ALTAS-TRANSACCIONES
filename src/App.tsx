@@ -391,19 +391,25 @@ export default function App() {
 
         if (!statusData.online) return;
 
-        // Cargar padrón ARCA guardado (solo si no hay datos cargados ya en estado)
-        const arcaRes = await fetch("/api/arca-records");
-        const arcaData = await arcaRes.json();
-        if (arcaData.records?.length > 0) {
-          setArcaRecords(arcaData.records);
-          setSelectedPresetId("custom");
-        }
+        // Cargar padrón ARCA y transacciones en paralelo para reducir tiempo de carga
+        const [arcaRes, txRes] = await Promise.all([
+          fetch("/api/arca-records"),
+          fetch("/api/transactions")
+        ]);
 
-        // Cargar transacciones guardadas (solo las sueltas, sin analysis_id)
-        const txRes = await fetch("/api/transactions");
-        const txData = await txRes.json();
-        if (txData.transactions?.length > 0) {
-          setTransactions(txData.transactions);
+        const [arcaData, txData] = await Promise.all([
+          arcaRes.json(),
+          txRes.json()
+        ]);
+
+        // Solo reemplazar el estado si Supabase devuelve datos reales;
+        // si ambas tablas están vacías se mantienen los datos del preset activo.
+        const hasArcaData = Array.isArray(arcaData.records) && arcaData.records.length > 0;
+        const hasTxData = Array.isArray(txData.transactions) && txData.transactions.length > 0;
+
+        if (hasArcaData || hasTxData) {
+          if (hasArcaData) setArcaRecords(arcaData.records);
+          if (hasTxData) setTransactions(txData.transactions);
           setSelectedPresetId("custom");
         }
       } catch (err) {
@@ -2488,4 +2494,5 @@ export default function App() {
     </div>
   );
 }
+
 
