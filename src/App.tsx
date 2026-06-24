@@ -1655,7 +1655,7 @@ export default function App() {
                             Antigüedad
                             <span className="relative group cursor-help">
                               <Info className="w-3 h-3 text-rose-400 hover:text-rose-200 transition" />
-                              <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
+                              <span className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-64 bg-zinc-900 text-white text-[10px] font-normal normal-case tracking-normal rounded-lg px-3 py-2 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed">
                                 Días transcurridos desde la primera transacción detectada del sujeto en el período analizado hasta el Mes de Corte. Valores bajos indican actividad financiera muy reciente — principal indicador de riesgo AML junto con el volumen acumulado.
                               </span>
                             </span>
