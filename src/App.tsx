@@ -717,10 +717,12 @@ export default function App() {
         
         const parsed: {cuit: string, fechaAlta: string, umbral: number}[] = [];
         
+        const arcaWarnings: { fila: number; cuit: string; campo: string; valor: string }[] = [];
+
         rows.forEach((row, idx) => {
           if (row.length < 2) return;
           
-          // Detect header row and skip
+          // Detectar y saltear fila de encabezado
           const firstColStr = String(row[0] || "").toLowerCase();
           const secondColStr = String(row[1] || "").toLowerCase();
           if (idx === 0 && (firstColStr.includes("cuit") || secondColStr.includes("alta") || secondColStr.includes("fecha"))) {
@@ -728,10 +730,32 @@ export default function App() {
           }
           
           const cuitVal = String(row[0] || "").trim().replace(/\D/g, "");
+
+          // CUIT vacío o inválido → saltear fila silenciosamente
           if (!cuitVal || cuitVal.length < 5) return;
-          
-          const fechaVal = String(row[1] || "").trim();
-          const umbralVal = parseFloat(String(row[2] || "").trim().replace(/[^0-9.-]/g, "")) || 0;
+
+          // CUIT con longitud incorrecta (debería ser 11 dígitos)
+          if (cuitVal.length !== 11) {
+            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "CUIT", valor: `${cuitVal} (${cuitVal.length} dígitos, se esperan 11)` });
+          }
+
+          // FECHA_ALTA: validar formato dd/mm/yyyy
+          const fechaRaw = String(row[1] || "").trim();
+          const fechaValida = /^\d{2}\/\d{2}\/\d{4}$/.test(fechaRaw);
+          const fechaVal = fechaValida ? fechaRaw : "";
+          if (fechaRaw && !fechaValida) {
+            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "FECHA_ALTA", valor: `"${fechaRaw}" (formato esperado: dd/mm/yyyy)` });
+          }
+          if (!fechaRaw) {
+            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "FECHA_ALTA", valor: "(vacío)" });
+          }
+
+          // UMBRAL: usar parseMonto para tolerar formatos argentinos
+          const umbralRaw = String(row[2] || "").trim();
+          const { amount: umbralVal, invalid: umbralInvalid } = parseMonto(umbralRaw);
+          if (umbralInvalid || umbralRaw === "") {
+            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "UMBRAL", valor: `"${umbralRaw || "(vacío)"}" → se registra como $0` });
+          }
           
           parsed.push({
             cuit: cuitVal,
@@ -742,6 +766,21 @@ export default function App() {
 
         if (parsed.length === 0) {
           throw new Error("No se leyeron registros válidos del archivo de Excel/CSV.");
+        }
+
+        // Toast Opción A: mostrar advertencias de calidad de datos (máx 5)
+        if (arcaWarnings.length > 0) {
+          const preview = arcaWarnings.slice(0, 5)
+            .map(w => `Fila ${w.fila} · CUIT ${w.cuit} · ${w.campo}: ${w.valor}`)
+            .join("
+");
+          const extra = arcaWarnings.length > 5 ? `
+...y ${arcaWarnings.length - 5} campo${arcaWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
+          showToast(
+            `⚠️ ${arcaWarnings.length} problema${arcaWarnings.length > 1 ? "s" : ""} detectado${arcaWarnings.length > 1 ? "s" : ""} en el padrón ARCA:
+${preview}${extra}`,
+            "error"
+          );
         }
 
         if (selectedPresetId !== "custom") {
@@ -788,16 +827,31 @@ export default function App() {
             return;
           }
           
-          const tipoRow = String(row[0] || "").trim().toUpperCase() === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
+          // TIPO: validar que sea ORDENADA o RECIBIDA
+          const tipoRaw = String(row[0] || "").trim().toUpperCase();
+          const tipoRow = tipoRaw === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
+          if (tipoRaw !== "ORDENADA" && tipoRaw !== "RECIBIDA") {
+            invalidMontos.push({ fila: idx + 1, cuit: String(row[3] || "").trim(), valor: `TIPO="${tipoRaw || "(vacío)"}" → se asume RECIBIDA` });
+          }
+
+          // FECHA: validar formato dd/mm/yyyy
           const fechaRow = String(row[1] || "").trim();
+          if (!fechaRow || !/^\d{2}\/\d{2}\/\d{4}$/.test(fechaRow)) {
+            invalidMontos.push({ fila: idx + 1, cuit: String(row[3] || "").trim(), valor: `FECHA="${fechaRow || "(vacío)"}" (formato esperado: dd/mm/yyyy)` });
+          }
+
+          // MONTO: usar parseMonto
           const rawMonto = String(row[2] || "").trim();
           const { amount: montoAmount, invalid: montoInvalid } = parseMonto(rawMonto);
+          if (montoInvalid) {
+            invalidMontos.push({ fila: idx + 1, cuit: String(row[3] || "").trim(), valor: `MONTO="${rawMonto || "(vacío)"}" → se registra como $0` });
+          }
+
+          // CUIT sujeto: debe tener 11 dígitos
           const cuitRow = String(row[3] || "").trim().replace(/\D/g, "");
           if (!cuitRow) return;
-
-          // Registrar monto inválido para mostrar al usuario (máx 5 en UI)
-          if (montoInvalid) {
-            invalidMontos.push({ fila: idx + 1, cuit: cuitRow, valor: rawMonto || "(vacío)" });
+          if (cuitRow.length !== 11) {
+            invalidMontos.push({ fila: idx + 1, cuit: cuitRow, valor: `CUIT="${cuitRow}" (${cuitRow.length} dígitos, se esperan 11)` });
           }
           
           const sujetoDenom = String(row[4] || "").trim() || getArgentineFallbackName(cuitRow, "Sujeto");
@@ -822,16 +876,16 @@ export default function App() {
           throw new Error("No se leyeron transacciones consistentes de Excel/CSV.");
         }
 
-        // Toast de advertencia si hay montos inválidos (Opción A)
+        // Toast Opción A: advertencias de calidad de datos en operaciones (máx 5)
         if (invalidMontos.length > 0) {
           const preview = invalidMontos.slice(0, 5)
-            .map(e => `Fila ${e.fila} · CUIT ${e.cuit} · valor: "${e.valor}"`)
+            .map(e => `Fila ${e.fila}${e.cuit ? ` · CUIT ${e.cuit}` : ""} · ${e.valor}`)
             .join("
 ");
           const extra = invalidMontos.length > 5 ? `
-...y ${invalidMontos.length - 5} más.` : "";
+...y ${invalidMontos.length - 5} problema${invalidMontos.length - 5 > 1 ? "s" : ""} más.` : "";
           showToast(
-            `⚠️ ${invalidMontos.length} monto${invalidMontos.length > 1 ? "s" : ""} inválido${invalidMontos.length > 1 ? "s" : ""} detectado${invalidMontos.length > 1 ? "s" : ""} — se registraron como $0:
+            `⚠️ ${invalidMontos.length} problema${invalidMontos.length > 1 ? "s" : ""} detectado${invalidMontos.length > 1 ? "s" : ""} en el archivo de operaciones:
 ${preview}${extra}`,
             "error"
           );
