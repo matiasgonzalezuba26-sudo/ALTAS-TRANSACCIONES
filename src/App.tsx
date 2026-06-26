@@ -330,6 +330,11 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
 
+  // Advertencias de calidad de datos al cargar archivos (badge B)
+  type FileWarning = { fila: number; cuit: string; campo: string; detalle: string };
+  const [arcaWarningsList, setArcaWarningsList] = useState<FileWarning[]>([]);
+  const [opsWarningsList, setOpsWarningsList] = useState<FileWarning[]>([]);
+
   // Selected visual node in the network graph for forensic drill-down
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
@@ -646,6 +651,8 @@ export default function App() {
 
   // Limpia todas las tablas en Supabase y resetea el estado local.
   const handleClearAllData = async () => {
+    setArcaWarningsList([]);
+    setOpsWarningsList([]);
     if (!window.confirm("¿Confirmar limpieza completa? Se borrarán todos los registros de Supabase (ARCA, transacciones, análisis, nodos y edges). Esta acción no se puede deshacer.")) return;
     try {
       const res = await fetch("/api/clear-data", { method: "DELETE" });
@@ -703,6 +710,7 @@ export default function App() {
   // Handle ARCA file uploads (.xlsx, .xls, .csv)
   const handleArcaFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setArcaImportError("");
+    setArcaWarningsList([]); // limpiar advertencias previas al cargar nuevo archivo
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -717,70 +725,68 @@ export default function App() {
         
         const parsed: {cuit: string, fechaAlta: string, umbral: number}[] = [];
         
-        const arcaWarnings: { fila: number; cuit: string; campo: string; valor: string }[] = [];
+        const arcaWarnings: FileWarning[] = [];
 
-        rows.forEach((row, idx) => {
+        rows.forEach((row, rowIdx) => {
           if (row.length < 2) return;
-          
+
           // Detectar y saltear fila de encabezado
           const firstColStr = String(row[0] || "").toLowerCase();
           const secondColStr = String(row[1] || "").toLowerCase();
-          if (idx === 0 && (firstColStr.includes("cuit") || secondColStr.includes("alta") || secondColStr.includes("fecha"))) {
+          if (rowIdx === 0 && (firstColStr.includes("cuit") || secondColStr.includes("alta") || secondColStr.includes("fecha"))) {
             return;
           }
-          
-          const cuitVal = String(row[0] || "").trim().replace(/\D/g, "");
 
-          // CUIT vacío o inválido → saltear fila silenciosamente
-          if (!cuitVal || cuitVal.length < 5) return;
+          const rawCuit = String(row[0] || "").trim();
+          const cuitVal = rawCuit.replace(/\D/g, "");
 
-          // CUIT con longitud incorrecta (debería ser 11 dígitos)
+          // CUIT -1 (contraparte desconocida): excluir de ARCA silenciosamente
+          if (rawCuit.trim() === "-1" || cuitVal === "1" && rawCuit.includes("-")) return;
+
+          // CUIT vacío → excluir silenciosamente
+          if (!cuitVal) return;
+
+          // CUIT con longitud incorrecta → excluir y advertir
           if (cuitVal.length !== 11) {
-            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "CUIT", valor: `${cuitVal} (${cuitVal.length} dígitos, se esperan 11)` });
+            arcaWarnings.push({ fila: rowIdx + 1, cuit: rawCuit, campo: "CUIT", detalle: `"${rawCuit}" tiene ${cuitVal.length} dígitos (se esperan 11) — excluido del análisis` });
+            return;
           }
 
           // FECHA_ALTA: validar formato dd/mm/yyyy
           const fechaRaw = String(row[1] || "").trim();
           const fechaValida = /^\d{2}\/\d{2}\/\d{4}$/.test(fechaRaw);
           const fechaVal = fechaValida ? fechaRaw : "";
-          if (fechaRaw && !fechaValida) {
-            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "FECHA_ALTA", valor: `"${fechaRaw}" (formato esperado: dd/mm/yyyy)` });
-          }
           if (!fechaRaw) {
-            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "FECHA_ALTA", valor: "(vacío)" });
+            arcaWarnings.push({ fila: rowIdx + 1, cuit: cuitVal, campo: "FECHA_ALTA", detalle: "vacía — se registrará como Sin Fecha Informada" });
+          } else if (!fechaValida) {
+            arcaWarnings.push({ fila: rowIdx + 1, cuit: cuitVal, campo: "FECHA_ALTA", detalle: `"${fechaRaw}" no tiene formato dd/mm/yyyy — se registrará como Sin Fecha Informada` });
           }
 
           // UMBRAL: usar parseMonto para tolerar formatos argentinos
           const umbralRaw = String(row[2] || "").trim();
           const { amount: umbralVal, invalid: umbralInvalid } = parseMonto(umbralRaw);
           if (umbralInvalid || umbralRaw === "") {
-            arcaWarnings.push({ fila: idx + 1, cuit: cuitVal, campo: "UMBRAL", valor: `"${umbralRaw || "(vacío)"}" → se registra como $0` });
+            arcaWarnings.push({ fila: rowIdx + 1, cuit: cuitVal, campo: "UMBRAL", detalle: `"${umbralRaw || "(vacío)"}" no es un monto válido — se registra como $0` });
           }
-          
-          parsed.push({
-            cuit: cuitVal,
-            fechaAlta: fechaVal,
-            umbral: umbralVal
-          });
+
+          parsed.push({ cuit: cuitVal, fechaAlta: fechaVal, umbral: umbralVal });
         });
 
         if (parsed.length === 0) {
           throw new Error("No se leyeron registros válidos del archivo de Excel/CSV.");
         }
 
-        // Toast Opción A: mostrar advertencias de calidad de datos (máx 5)
+        // Toast A + estado badge B
+        setArcaWarningsList(arcaWarnings);
         if (arcaWarnings.length > 0) {
           const preview = arcaWarnings.slice(0, 5)
-            .map(w => `Fila ${w.fila} · CUIT ${w.cuit} · ${w.campo}: ${w.valor}`)
+            .map(w => `Fila ${w.fila} · ${w.campo}: ${w.detalle}`)
             .join("
 ");
           const extra = arcaWarnings.length > 5 ? `
-...y ${arcaWarnings.length - 5} campo${arcaWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
-          showToast(
-            `⚠️ ${arcaWarnings.length} problema${arcaWarnings.length > 1 ? "s" : ""} detectado${arcaWarnings.length > 1 ? "s" : ""} en el padrón ARCA:
-${preview}${extra}`,
-            "error"
-          );
+...y ${arcaWarnings.length - 5} problema${arcaWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
+          showToast(`⚠️ ${arcaWarnings.length} problema${arcaWarnings.length > 1 ? "s" : ""} en el padrón ARCA:
+${preview}${extra}`, "error");
         }
 
         if (selectedPresetId !== "custom") {
@@ -802,6 +808,7 @@ ${preview}${extra}`,
   // Handle Operations File Upload (.xlsx, .xls, .csv)
   const handleOpsFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setOpsImportError("");
+    setOpsWarningsList([]); // limpiar advertencias previas al cargar nuevo archivo
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -815,54 +822,78 @@ ${preview}${extra}`,
         const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
         
         const parsed: Transaction[] = [];
-        const invalidMontos: { fila: number; cuit: string; valor: string }[] = [];
-        
-        rows.forEach((row, idx) => {
+        const opsWarnings: FileWarning[] = [];
+
+        rows.forEach((row, rowIdx) => {
           if (row.length < 5) return;
-          
-          // Detect header
+
+          // Detectar y saltear fila de encabezado
           const col0Str = String(row[0] || "").toLowerCase();
           const col3Str = String(row[3] || "").toLowerCase();
-          if (idx === 0 && (col0Str.includes("sentido") || col0Str.includes("tipo") || col3Str.includes("cuit") || col3Str.includes("sujeto"))) {
+          if (rowIdx === 0 && (col0Str.includes("sentido") || col0Str.includes("tipo") || col3Str.includes("cuit") || col3Str.includes("sujeto"))) {
             return;
           }
-          
-          // TIPO: validar que sea ORDENADA o RECIBIDA
+
+          // ── TIPO ──────────────────────────────────────────────────────────
           const tipoRaw = String(row[0] || "").trim().toUpperCase();
-          const tipoRow = tipoRaw === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
+          const tipoRow: "ORDENADA" | "RECIBIDA" = tipoRaw === "ORDENADA" ? "ORDENADA" : "RECIBIDA";
           if (tipoRaw !== "ORDENADA" && tipoRaw !== "RECIBIDA") {
-            invalidMontos.push({ fila: idx + 1, cuit: String(row[3] || "").trim(), valor: `TIPO="${tipoRaw || "(vacío)"}" → se asume RECIBIDA` });
+            opsWarnings.push({ fila: rowIdx + 1, cuit: String(row[3] || "").trim(), campo: "TIPO", detalle: `"${tipoRaw || "(vacío)"}" no es válido — se asume RECIBIDA` });
           }
 
-          // FECHA: validar formato dd/mm/yyyy
+          // ── FECHA ─────────────────────────────────────────────────────────
           const fechaRow = String(row[1] || "").trim();
-          if (!fechaRow || !/^\d{2}\/\d{2}\/\d{4}$/.test(fechaRow)) {
-            invalidMontos.push({ fila: idx + 1, cuit: String(row[3] || "").trim(), valor: `FECHA="${fechaRow || "(vacío)"}" (formato esperado: dd/mm/yyyy)` });
+          const fechaValida = /^\d{2}\/\d{2}\/\d{4}$/.test(fechaRow);
+          if (!fechaRow) {
+            opsWarnings.push({ fila: rowIdx + 1, cuit: String(row[3] || "").trim(), campo: "FECHA", detalle: "vacía — fila incluida sin fecha" });
+          } else if (!fechaValida) {
+            opsWarnings.push({ fila: rowIdx + 1, cuit: String(row[3] || "").trim(), campo: "FECHA", detalle: `"${fechaRow}" no tiene formato dd/mm/yyyy — fila incluida sin fecha` });
           }
 
-          // MONTO: usar parseMonto
+          // ── MONTO ─────────────────────────────────────────────────────────
           const rawMonto = String(row[2] || "").trim();
           const { amount: montoAmount, invalid: montoInvalid } = parseMonto(rawMonto);
           if (montoInvalid) {
-            invalidMontos.push({ fila: idx + 1, cuit: String(row[3] || "").trim(), valor: `MONTO="${rawMonto || "(vacío)"}" → se registra como $0` });
+            opsWarnings.push({ fila: rowIdx + 1, cuit: String(row[3] || "").trim(), campo: "MONTO", detalle: `"${rawMonto || "(vacío)"}" no es válido — se registra como $0` });
           }
 
-          // CUIT sujeto: debe tener 11 dígitos
-          const cuitRow = String(row[3] || "").trim().replace(/\D/g, "");
+          // ── CUIT SUJETO ───────────────────────────────────────────────────
+          const rawCuitSujeto = String(row[3] || "").trim();
+          const isMinusOneSujeto = rawCuitSujeto.replace(/\s/g, "") === "-1";
+          const cuitRow = isMinusOneSujeto ? "-1" : rawCuitSujeto.replace(/\D/g, "");
+
+          // CUIT vacío → excluir silenciosamente
           if (!cuitRow) return;
-          if (cuitRow.length !== 11) {
-            invalidMontos.push({ fila: idx + 1, cuit: cuitRow, valor: `CUIT="${cuitRow}" (${cuitRow.length} dígitos, se esperan 11)` });
+
+          // CUIT no es -1 y no tiene 11 dígitos → excluir y advertir
+          if (!isMinusOneSujeto && cuitRow.length !== 11) {
+            opsWarnings.push({ fila: rowIdx + 1, cuit: rawCuitSujeto, campo: "CUIT", detalle: `"${rawCuitSujeto}" tiene ${cuitRow.length} dígitos (se esperan 11) — fila excluida del análisis` });
+            return;
           }
-          
-          const sujetoDenom = String(row[4] || "").trim() || getArgentineFallbackName(cuitRow, "Sujeto");
-          const cuitContraRow = String(row[5] || "").trim().replace(/\D/g, "");
-          const contraDenom = String(row[6] || "").trim() || getArgentineFallbackName(cuitContraRow, "Contraparte");
-          const fechaAltaLookup = cuitAltaDatesMap[cuitRow] || fechaRow;
-          
+
+          // ── DENOMINACION SUJETO ───────────────────────────────────────────
+          const rawDenomSujeto = String(row[4] || "").trim();
+          const sujetoDenom = (!rawDenomSujeto || isMinusOneSujeto)
+            ? "SIN DENOMINACION"
+            : rawDenomSujeto;
+
+          // ── CUIT CONTRAPARTE ──────────────────────────────────────────────
+          const rawCuitContra = String(row[5] || "").trim();
+          const isMinusOneContra = rawCuitContra.replace(/\s/g, "") === "-1";
+          const cuitContraRow = isMinusOneContra ? "-1" : rawCuitContra.replace(/\D/g, "");
+
+          // ── DENOMINACION CONTRAPARTE ──────────────────────────────────────
+          const rawDenomContra = String(row[6] || "").trim();
+          const contraDenom = (!rawDenomContra || isMinusOneContra)
+            ? "SIN DENOMINACION"
+            : rawDenomContra;
+
+          const fechaAltaLookup = cuitAltaDatesMap[cuitRow] || (fechaValida ? fechaRow : "");
+
           parsed.push({
             OPERACION: "TRANSFERENCIA",
             TIPO: tipoRow,
-            FECHA: fechaRow,
+            FECHA: fechaValida ? fechaRow : "",
             MONTO: String(montoAmount),
             CUIT: cuitRow,
             CUIT_CONTRAPARTE: cuitContraRow,
@@ -876,19 +907,17 @@ ${preview}${extra}`,
           throw new Error("No se leyeron transacciones consistentes de Excel/CSV.");
         }
 
-        // Toast Opción A: advertencias de calidad de datos en operaciones (máx 5)
-        if (invalidMontos.length > 0) {
-          const preview = invalidMontos.slice(0, 5)
-            .map(e => `Fila ${e.fila}${e.cuit ? ` · CUIT ${e.cuit}` : ""} · ${e.valor}`)
+        // Toast A + estado badge B
+        setOpsWarningsList(opsWarnings);
+        if (opsWarnings.length > 0) {
+          const preview = opsWarnings.slice(0, 5)
+            .map(w => `Fila ${w.fila}${w.cuit ? ` · CUIT ${w.cuit}` : ""} · ${w.campo}: ${w.detalle}`)
             .join("
 ");
-          const extra = invalidMontos.length > 5 ? `
-...y ${invalidMontos.length - 5} problema${invalidMontos.length - 5 > 1 ? "s" : ""} más.` : "";
-          showToast(
-            `⚠️ ${invalidMontos.length} problema${invalidMontos.length > 1 ? "s" : ""} detectado${invalidMontos.length > 1 ? "s" : ""} en el archivo de operaciones:
-${preview}${extra}`,
-            "error"
-          );
+          const extra = opsWarnings.length > 5 ? `
+...y ${opsWarnings.length - 5} problema${opsWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
+          showToast(`⚠️ ${opsWarnings.length} problema${opsWarnings.length > 1 ? "s" : ""} en operaciones:
+${preview}${extra}`, "error");
         }
 
         if (selectedPresetId !== "custom") {
@@ -1974,6 +2003,27 @@ ${preview}${extra}`,
                 </div>
               </div>
 
+              {/* Badge B: Advertencias de calidad de datos ARCA */}
+              {arcaWarningsList.length > 0 && (
+                <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-[10px] text-amber-800 font-medium">
+                  <div className="flex items-center gap-1.5 mb-1.5 font-extrabold text-amber-700 uppercase tracking-wider">
+                    <span>⚠</span>
+                    <span>{arcaWarningsList.length} problema{arcaWarningsList.length > 1 ? "s" : ""} detectado{arcaWarningsList.length > 1 ? "s" : ""} en el padrón ARCA</span>
+                  </div>
+                  <ul className="space-y-0.5 pl-1">
+                    {arcaWarningsList.slice(0, 5).map((w, i) => (
+                      <li key={i} className="flex gap-1.5">
+                        <span className="text-amber-500 shrink-0">·</span>
+                        <span><span className="font-bold">Fila {w.fila}</span> · {w.campo}: {w.detalle}</span>
+                      </li>
+                    ))}
+                    {arcaWarningsList.length > 5 && (
+                      <li className="text-amber-600 font-bold pl-3">...y {arcaWarningsList.length - 5} problema{arcaWarningsList.length - 5 > 1 ? "s" : ""} más.</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
               {/* Panel B: CARGAR OPERACIONES FINANCIERAS */}
               <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-xs flex flex-col gap-4">
                 <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
@@ -2042,6 +2092,27 @@ ${preview}${extra}`,
                     {transactions.length} Totales
                   </div>
                 </div>
+
+                {/* Badge B: Advertencias de calidad de datos Operaciones */}
+                {opsWarningsList.length > 0 && (
+                  <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-[10px] text-amber-800 font-medium">
+                    <div className="flex items-center gap-1.5 mb-1.5 font-extrabold text-amber-700 uppercase tracking-wider">
+                      <span>⚠</span>
+                      <span>{opsWarningsList.length} problema{opsWarningsList.length > 1 ? "s" : ""} detectado{opsWarningsList.length > 1 ? "s" : ""} en operaciones</span>
+                    </div>
+                    <ul className="space-y-0.5 pl-1">
+                      {opsWarningsList.slice(0, 5).map((w, i) => (
+                        <li key={i} className="flex gap-1.5">
+                          <span className="text-amber-500 shrink-0">·</span>
+                          <span><span className="font-bold">Fila {w.fila}</span>{w.cuit ? ` · CUIT ${w.cuit}` : ""} · {w.campo}: {w.detalle}</span>
+                        </li>
+                      ))}
+                      {opsWarningsList.length > 5 && (
+                        <li className="text-amber-600 font-bold pl-3">...y {opsWarningsList.length - 5} problema{opsWarningsList.length - 5 > 1 ? "s" : ""} más.</li>
+                      )}
+                    </ul>
+                  </div>
+                )}
               </div>
 
             </div>
