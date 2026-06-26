@@ -253,12 +253,13 @@ export default function NetworkGraph({
   }, [renderNodes, draggedPositions, groupNodes]);
 
   const getNodeColor = (node: AMLNode, isCommon: boolean) => {
+    // Contraparte común siempre azul, tiene prioridad sobre el tipo
+    if (isCommon) return { fill: "#dbeafe", stroke: "#3b82f6" };
     if (node.type === "ANALIZADO") {
       if (node.risk_level === "ALTO") return { fill: "#fee2e2", stroke: "#ef4444" };
       if (node.risk_level === "MEDIO") return { fill: "#fef3c7", stroke: "#f59e0b" };
       return { fill: "#d1fae5", stroke: "#10b981" };
     }
-    if (isCommon) return { fill: "#dbeafe", stroke: "#3b82f6" };
     const sends = edges.some(e => e.source === node.id);
     const receives = edges.some(e => e.target === node.id);
     if (sends && receives) return { fill: "#fef9c3", stroke: "#ea580c" };
@@ -335,16 +336,16 @@ export default function NetworkGraph({
           {legendOpen && (
             <div className="mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 p-2.5 rounded-lg shadow-md flex flex-col gap-1.5">
               {legendItems.map(([fill, stroke, label]) => (
-                <div key={label} className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700">
-                  <svg width="14" height="14" className="flex-shrink-0">
-                    <circle cx="7" cy="7" r="6" fill={fill} stroke={stroke} strokeWidth="2" />
+                <div key={label} style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"10px", fontWeight:600, color:"#3f3f46" }}>
+                  <svg width="14" height="14" style={{ flexShrink:0 }}>
+                    <circle cx="7" cy="7" r="5.5" fill={fill as string} stroke={stroke as string} strokeWidth="2" />
                   </svg>
                   <span>{label}</span>
                 </div>
               ))}
-              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700">
-                <svg width="14" height="14" className="flex-shrink-0">
-                  <circle cx="7" cy="7" r="6" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="3,2" />
+              <div style={{ display:"flex", alignItems:"center", gap:"6px", fontSize:"10px", fontWeight:600, color:"#3f3f46" }}>
+                <svg width="14" height="14" style={{ flexShrink:0 }}>
+                  <circle cx="7" cy="7" r="5.5" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="3,2" />
                 </svg>
                 <span>Grupo — click para expandir</span>
               </div>
