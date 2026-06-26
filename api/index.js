@@ -63,15 +63,19 @@ function parseMonto(value) {
   return isNaN(result) ? 0 : result;
 }
 function getDaysDifference(date1Str, date2Str) {
+  if (!date1Str || !date2Str) return null;
+  const isValidDate = (s) => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+  if (!isValidDate(date1Str) || !isValidDate(date2Str)) return null;
   try {
     const [d1, m1, y1] = date1Str.split("/").map(Number);
     const [d2, m2, y2] = date2Str.split("/").map(Number);
     const date1 = new Date(y1, m1 - 1, d1);
     const date2 = new Date(y2, m2 - 1, d2);
+    if (isNaN(date1.getTime()) || isNaN(date2.getTime())) return null;
     const diffTime = Math.abs(date2.getTime() - date1.getTime());
     return Math.floor(diffTime / (1e3 * 60 * 60 * 24));
-  } catch (error) {
-    return 0;
+  } catch {
+    return null;
   }
 }
 function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit = 90, arcaRecords = []) {
@@ -85,7 +89,8 @@ function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit =
       if (!uniqueSubjects.has(tx.CUIT)) {
         uniqueSubjects.set(tx.CUIT, {
           earliestTxDate: tx.FECHA,
-          altaDate: tx.FECHA_ALTA_CUIT || tx.FECHA
+          // Si no hay fecha de alta ARCA, usar la fecha de la primera tx como proxy
+          altaDate: tx.FECHA_ALTA_CUIT || tx.FECHA || ""
         });
       } else {
         const existing = uniqueSubjects.get(tx.CUIT);
@@ -109,7 +114,7 @@ function performLocalAnalysis(transactions, thresholdPrice, antiquityDaysLimit =
   let highRiskCount = 0;
   uniqueSubjects.forEach((info, cuit) => {
     const antiquity = getDaysDifference(info.altaDate, info.earliestTxDate);
-    const isNewcomer = antiquity < antiquityDaysLimit;
+    const isNewcomer = antiquity !== null && antiquity < antiquityDaysLimit;
     const cuitTxs = transactions.filter((t) => t.CUIT === cuit);
     const maxSingleMonto = Math.max(...cuitTxs.map((t) => parseMonto(t.MONTO)), 0);
     const totalCuitVolume = cuitTxs.reduce((sum, t) => sum + parseMonto(t.MONTO), 0);
