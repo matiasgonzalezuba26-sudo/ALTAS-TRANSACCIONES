@@ -298,6 +298,7 @@ export default function NetworkGraph({
     ["#dbeafe", "#3b82f6", "Contraparte Común"],
     ["#d1fae5", "#22c55e", "Envía al Sujeto"],
     ["#ffedd5", "#f97316", "Recibe del Sujeto"],
+    ["#fef9c3", "#ea580c", "Envía y Recibe"],
   ];
 
   return (
@@ -335,8 +336,8 @@ export default function NetworkGraph({
             <div className="mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 p-2.5 rounded-lg shadow-md flex flex-col gap-1.5">
               {legendItems.map(([fill, stroke, label]) => (
                 <div key={label} className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700">
-                  <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: fill, border: `2px solid ${stroke}` }} />
-                  {label}
+                  <span className="w-3 h-3 rounded-full flex-shrink-0 inline-block" style={{ backgroundColor: fill, border: `2px solid ${stroke}` }} />
+                  <span>{label}</span>
                 </div>
               ))}
               <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700">
