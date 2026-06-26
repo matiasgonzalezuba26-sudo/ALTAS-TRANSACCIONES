@@ -25,16 +25,20 @@ function parseMonto(value: any): number {
 }
 
 // Helper function to calculate calendar day difference
-function getDaysDifference(date1Str: string, date2Str: string): number {
+function getDaysDifference(date1Str: string, date2Str: string): number | null {
+  if (!date1Str || !date2Str) return null;
+  const isValidDate = (s: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(s);
+  if (!isValidDate(date1Str) || !isValidDate(date2Str)) return null;
   try {
     const [d1, m1, y1] = date1Str.split("/").map(Number);
     const [d2, m2, y2] = date2Str.split("/").map(Number);
     const date1 = new Date(y1, m1 - 1, d1);
     const date2 = new Date(y2, m2 - 1, d2);
+    if (isNaN(date1.getTime()) || isNaN(date2.getTime())) return null;
     const diffTime = Math.abs(date2.getTime() - date1.getTime());
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
-  } catch (error) {
-    return 0;
+  } catch {
+    return null;
   }
 }
 
@@ -53,7 +57,8 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
       if (!uniqueSubjects.has(tx.CUIT)) {
         uniqueSubjects.set(tx.CUIT, {
           earliestTxDate: tx.FECHA,
-          altaDate: tx.FECHA_ALTA_CUIT || tx.FECHA
+          // Si no hay fecha de alta ARCA, usar la fecha de la primera tx como proxy
+          altaDate: tx.FECHA_ALTA_CUIT || tx.FECHA || ""
         });
       } else {
         // Actualizar earliestTxDate si esta transacción es más antigua que la guardada
@@ -81,7 +86,9 @@ function performLocalAnalysis(transactions: any[], thresholdPrice: number, antiq
   // Evaluate subject nodes
   uniqueSubjects.forEach((info, cuit) => {
     const antiquity = getDaysDifference(info.altaDate, info.earliestTxDate);
-    const isNewcomer = antiquity < antiquityDaysLimit;
+    // Si no se pudo calcular antigüedad (fecha vacía), no se puede determinar isNewcomer
+    // → se evalúa solo por volumen → riesgo MEDIO, nunca ALTO por antigüedad
+    const isNewcomer = antiquity !== null && antiquity < antiquityDaysLimit;
 
     // Calculate aggregated amounts or picos
     const cuitTxs = transactions.filter(t => t.CUIT === cuit);
@@ -661,4 +668,5 @@ Responde SOLO con un JSON válido sin markdown, con este esquema:
 // funciones serverless de Node. Esto permite reusar exactamente la misma
 // app tanto en local (server.ts -> app.listen) como en Vercel (api/index.js).
 export default app;
+
 
