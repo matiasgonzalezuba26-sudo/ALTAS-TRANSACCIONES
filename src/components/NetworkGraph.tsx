@@ -227,9 +227,10 @@ export default function NetworkGraph({
       }
     }
 
-    // Fallback for unplaced nodes
+    // Fallback for unplaced nodes — skip members that are inside a group
+    const groupedMemberIds = new Set(groupNodes.flatMap(g => g.members.map(m => m.id)));
     nodes.forEach(n => {
-      if (!result.find(r => r.id === n.id))
+      if (!result.find(r => r.id === n.id) && !groupedMemberIds.has(n.id))
         result.push({ id: n.id, x: dimensions.width / 2, y: dimensions.height / 2, isGroup: false, node: n, radius: 18 });
     });
 
@@ -445,7 +446,8 @@ export default function NetworkGraph({
                   const isAnalyzedGroup = g.id === "__group_analyzed__";
                   return (
                     <g key={rn.id} transform={`translate(${cx}, ${cy})`} className="cursor-pointer"
-                      onClick={e => { e.stopPropagation(); setExpandedGroup(expandedGroup === g.id ? null : g.id); }}>
+                      onClick={e => { e.stopPropagation(); setExpandedGroup(expandedGroup === g.id ? null : g.id); }}
+                    onMouseDown={e => { e.stopPropagation(); setDraggedNodeId(rn.id); }}>
                       <circle r={rn.radius} fill={isAnalyzedGroup ? "#fee2e2" : "#f1f5f9"}
                         stroke={isAnalyzedGroup ? "#ef4444" : "#94a3b8"}
                         strokeWidth="1.5" strokeDasharray="5,3"
