@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { AMLNode, AMLEdge } from "../types";
-import { Info, ZoomIn, ZoomOut, RotateCcw, AlertTriangle, ShieldCheck, Flame, Users, ArrowRightLeft } from "lucide-react";
+import { ZoomIn, ZoomOut, RotateCcw, Users, ArrowRightLeft } from "lucide-react";
 
 interface NetworkGraphProps {
   nodes: AMLNode[];
@@ -12,702 +12,426 @@ interface NetworkGraphProps {
   commonCounterparts?: string[];
 }
 
-interface NodePosition {
+interface GroupNode {
+  id: string;
+  label: string;
+  members: AMLNode[];
+  totalVolume: number;
+}
+
+interface RenderNode {
   id: string;
   x: number;
   y: number;
-  node: AMLNode;
-  weight: number; // Volume of transactions
-  isSource: boolean;
-  isTarget: boolean;
+  isGroup: boolean;
+  group?: GroupNode;
+  node?: AMLNode;
+  radius: number;
 }
 
-function wrapText(text: string, maxLen: number = 18): string[] {
+function wrapText(text: string, maxLen: number = 16): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
-  let currentLine = "";
-  for (const word of words) {
-    if ((currentLine + " " + word).trim().length <= maxLen) {
-      currentLine = (currentLine + " " + word).trim();
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length <= maxLen) {
+      cur = (cur + " " + w).trim();
     } else {
-      if (currentLine) lines.push(currentLine);
-      currentLine = word;
+      if (cur) lines.push(cur);
+      cur = w.slice(0, maxLen);
     }
   }
-  if (currentLine) lines.push(currentLine);
-  if (lines.length === 0) lines.push(text);
-  return lines;
+  if (cur) lines.push(cur);
+  return lines.length ? lines : [text.slice(0, maxLen)];
 }
 
-export default function NetworkGraph({ 
-  nodes, 
-  edges, 
-  selectedNodeId, 
-  onSelectNode,
-  cuitDenominacionesMap,
-  currentCuit,
-  commonCounterparts = []
+function formatK(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  return `${Math.round(n / 1000)}k`;
+}
+
+const COUNTERPART_LIMIT = 9;
+const COUNTERPART_TOP = 4;
+
+export default function NetworkGraph({
+  nodes, edges, selectedNodeId, onSelectNode,
+  cuitDenominacionesMap, currentCuit, commonCounterparts = []
 }: NetworkGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 480 });
+  const [dimensions, setDimensions] = useState({ width: 800, height: 500 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
-  // Dragging individual nodes state
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
   const [draggedPositions, setDraggedPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
-  // Update dimensions with a ResizeObserver to avoid scaling issues in iframes
+  const isLargeNetwork = nodes.length > 6;
+
   useEffect(() => {
     if (!containerRef.current) return;
-    
-    const updateSize = () => {
-      setDimensions({
-        width: containerRef.current?.clientWidth || 800,
-        height: 500
-      });
-    };
-
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
+    const update = () => setDimensions({ width: containerRef.current?.clientWidth || 800, height: 500 });
+    update();
+    const obs = new ResizeObserver(update);
+    obs.observe(containerRef.current);
+    return () => obs.disconnect();
   }, []);
 
-  // Compute node weights (total transaction volume through each node)
   const nodeVolumes = useMemo(() => {
-    const volumes: Record<string, number> = {};
-    nodes.forEach(n => { volumes[n.id] = 0; });
+    const v: Record<string, number> = {};
+    nodes.forEach(n => { v[n.id] = 0; });
     edges.forEach(e => {
-      if (volumes[e.source] !== undefined) volumes[e.source] += e.amount_ars;
-      if (volumes[e.target] !== undefined) volumes[e.target] += e.amount_ars;
+      if (v[e.source] !== undefined) v[e.source] += e.amount_ars;
+      if (v[e.target] !== undefined) v[e.target] += e.amount_ars;
     });
-    return volumes;
+    return v;
   }, [nodes, edges]);
 
-  // High-fidelity structured layout algorithm (Tri-partite Left-Center-Right Flow)
-  const nodePositions = useMemo(() => {
-    const width = dimensions.width;
-    const height = dimensions.height;
+  const { analyzedNodes, visibleSources, visibleTargets, commonNodes, groupNodes } = useMemo(() => {
+    const analyzed = nodes.filter(n => n.type === "ANALIZADO");
+    const common = nodes.filter(n => commonCounterparts.includes(n.id));
+    const counterparts = nodes.filter(n => n.type === "CONTRAPARTE" && !commonCounterparts.includes(n.id));
+    const byVol = (a: AMLNode, b: AMLNode) => (nodeVolumes[b.id] || 0) - (nodeVolumes[a.id] || 0);
 
-    // Separate nodes into distinct structural roles to make the network extremely readable
-    const analyzedNodes = nodes.filter(n => n.type === "ANALIZADO");
-    
-    // Find counterparties that are primarily sources (sending money into the system)
-    // vs destinations (receiving money out of the system)
-    const counterpartNodes = nodes.filter(n => n.type === "CONTRAPARTE");
-    
-    const sourceCounterparts: AMLNode[] = [];
-    const targetCounterparts: AMLNode[] = [];
+    const sources = counterparts.filter(c => edges.some(e => e.source === c.id) && !edges.some(e => e.target === c.id)).sort(byVol);
+    const targets = counterparts.filter(c => !edges.some(e => e.source === c.id) || edges.some(e => e.target === c.id)).sort(byVol);
 
-    counterpartNodes.forEach(c => {
-      const isSender = edges.some(e => e.source === c.id);
-      const isReceiver = edges.some(e => e.target === c.id);
-      
-      if (isSender && !isReceiver) {
-        sourceCounterparts.push(c);
-      } else {
-        // Default receiver or mixed
-        targetCounterparts.push(c);
-      }
-    });
+    const groups: GroupNode[] = [];
+    let visSrc = sources;
+    let visTgt = targets;
 
-    const positions: Record<string, NodePosition> = {};
-    const marginY = 60;
-
-    // 1. Position Source Counterparts on the LEFT
-    const leftX = width * 0.15;
-    const sourceCount = sourceCounterparts.length;
-    sourceCounterparts.forEach((node, idx) => {
-      const y = sourceCount > 1 
-        ? marginY + (idx * (height - marginY * 2)) / (sourceCount - 1)
-        : height / 2;
-      positions[node.id] = {
-        id: node.id,
-        x: leftX,
-        y: y,
-        node,
-        weight: nodeVolumes[node.id] || 0,
-        isSource: true,
-        isTarget: false
-      };
-    });
-
-    // 2. Position Subject CUITs (Under Analysis) in the CENTER
-    // Si hay muchos sujetos (modo grupal con red grande), usa grilla en vez de columna vertical
-    const centerX = width * 0.5;
-    const analyzedCount = analyzedNodes.length;
-
-    if (analyzedCount <= 4) {
-      // Pocos sujetos: columna vertical centrada (comportamiento original)
-      analyzedNodes.forEach((node, idx) => {
-        const y = analyzedCount > 1
-          ? marginY + (idx * (height - marginY * 2)) / (analyzedCount - 1)
-          : height / 2;
-        positions[node.id] = {
-          id: node.id,
-          x: centerX,
-          y: y,
-          node,
-          weight: nodeVolumes[node.id] || 0,
-          isSource: false,
-          isTarget: false
-        };
-      });
-    } else {
-      // Muchos sujetos (red grupal grande): grilla 2D centrada
-      const cols = Math.ceil(Math.sqrt(analyzedCount));
-      const rows = Math.ceil(analyzedCount / cols);
-      const cellW = (width * 0.5) / (cols + 1);
-      const cellH = (height - marginY * 2) / Math.max(rows, 1);
-      const startX = centerX - (cellW * (cols - 1)) / 2;
-
-      analyzedNodes.forEach((node, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        positions[node.id] = {
-          id: node.id,
-          x: startX + col * cellW,
-          y: marginY + row * cellH + cellH / 2,
-          node,
-          weight: nodeVolumes[node.id] || 0,
-          isSource: false,
-          isTarget: false
-        };
-      });
+    if (sources.length > COUNTERPART_LIMIT) {
+      visSrc = sources.slice(0, COUNTERPART_TOP);
+      const rest = sources.slice(COUNTERPART_TOP);
+      groups.push({ id: "__group_src__", label: `${rest.length} contrapartes menores`, members: rest, totalVolume: rest.reduce((s, n) => s + (nodeVolumes[n.id] || 0), 0) });
+    }
+    if (targets.length > COUNTERPART_LIMIT) {
+      visTgt = targets.slice(0, COUNTERPART_TOP);
+      const rest = targets.slice(COUNTERPART_TOP);
+      groups.push({ id: "__group_tgt__", label: `${rest.length} contrapartes menores`, members: rest, totalVolume: rest.reduce((s, n) => s + (nodeVolumes[n.id] || 0), 0) });
     }
 
-    // 3. Position Destination Counterparts on the RIGHT
-    const rightX = width * 0.85;
-    const targetCount = targetCounterparts.length;
-    targetCounterparts.forEach((node, idx) => {
-      const y = targetCount > 1
-        ? marginY + (idx * (height - marginY * 2)) / (targetCount - 1)
-        : height / 2;
-      positions[node.id] = {
-        id: node.id,
-        x: rightX,
-        y: y,
-        node,
-        weight: nodeVolumes[node.id] || 0,
-        isSource: false,
-        isTarget: true
-      };
+    return { analyzedNodes: analyzed, visibleSources: visSrc, visibleTargets: visTgt, commonNodes: common, groupNodes: groups };
+  }, [nodes, edges, commonCounterparts, nodeVolumes]);
+
+  const renderNodes = useMemo(() => {
+    const { width, height } = dimensions;
+    const result: RenderNode[] = [];
+    const mX = 90, mY = 75;
+
+    const col = (list: AMLNode[], x: number, r: number) => list.forEach((n, i) => {
+      const cnt = list.length;
+      result.push({ id: n.id, x, y: cnt > 1 ? mY + (i * (height - mY * 2)) / (cnt - 1) : height / 2, isGroup: false, node: n, radius: r });
     });
 
-    // Fallback placement (or circular coordinates if there are stray nodes or size is tight)
-    nodes.forEach(node => {
-      if (!positions[node.id]) {
-        positions[node.id] = {
-          id: node.id,
-          x: width / 2,
-          y: height / 2,
-          node,
-          weight: nodeVolumes[node.id] || 0,
-          isSource: false,
-          isTarget: false
-        };
-      }
+    const row = (list: AMLNode[], y: number, r: number) => list.forEach((n, i) => {
+      const cnt = list.length;
+      result.push({ id: n.id, x: cnt > 1 ? mX + (i * (width - mX * 2)) / (cnt - 1) : width / 2, y, isGroup: false, node: n, radius: r });
     });
 
-    return positions;
-  }, [nodes, edges, dimensions, nodeVolumes]);
+    const addGroup = (g: GroupNode, x: number, y: number) => result.push({ id: g.id, x, y, isGroup: true, group: g, radius: 22 });
 
-  // Max weight of transaction volume to scale node radii dynamically
-  const maxVolume = useMemo(() => {
-    return Math.max(...(Object.values(nodeVolumes) as number[]), 1);
-  }, [nodeVolumes]);
+    if (!isLargeNetwork) {
+      // ── SMALL: Left / Center / Right ──
+      col(visibleSources, width * 0.13, 18);
+      const sg = groupNodes.find(g => g.id === "__group_src__");
+      if (sg) addGroup(sg, width * 0.13, mY + visibleSources.length * 45 + 30);
 
-  // Get responsive scale for node size
-  const getNodeRadius = (nodeId: string, isSelected: boolean) => {
-    const isSubject = nodeId === currentCuit || nodes.some(n => n.id === nodeId && n.type === "ANALIZADO");
-    const isCommon = commonCounterparts && commonCounterparts.includes(nodeId);
-    const radius = isSubject ? 32 : (isCommon ? 24 : 18);
-    return isSelected ? radius + 4 : radius;
+      analyzedNodes.forEach((n, i) => {
+        const cnt = analyzedNodes.length;
+        result.push({ id: n.id, x: width * 0.5, y: cnt > 1 ? mY + (i * (height - mY * 2)) / (cnt - 1) : height / 2, isGroup: false, node: n, radius: 32 });
+      });
+
+      commonNodes.forEach((n, i) => {
+        const cnt = commonNodes.length;
+        result.push({ id: n.id, x: width * 0.72, y: cnt > 1 ? mY + (i * (height - mY * 2)) / (cnt - 1) : height / 2, isGroup: false, node: n, radius: 24 });
+      });
+
+      col(visibleTargets, width * 0.87, 18);
+      const tg = groupNodes.find(g => g.id === "__group_tgt__");
+      if (tg) addGroup(tg, width * 0.87, mY + visibleTargets.length * 45 + 30);
+
+    } else {
+      // ── LARGE: Top / Center / Bottom ──
+      row(visibleSources, mY, 18);
+      const sg = groupNodes.find(g => g.id === "__group_src__");
+      if (sg) addGroup(sg, Math.min(mX + visibleSources.length * ((width - mX * 2) / Math.max(visibleSources.length, 1)), width - mX), mY);
+
+      analyzedNodes.forEach((n, i) => {
+        const cnt = analyzedNodes.length;
+        result.push({ id: n.id, x: cnt > 1 ? mX + (i * (width * 0.78 - mX)) / (cnt - 1) : width * 0.4, y: height / 2, isGroup: false, node: n, radius: 32 });
+      });
+
+      commonNodes.forEach((n, i) => {
+        result.push({ id: n.id, x: width - mX - i * 55, y: height / 2, isGroup: false, node: n, radius: 24 });
+      });
+
+      row(visibleTargets, height - mY, 18);
+      const tg = groupNodes.find(g => g.id === "__group_tgt__");
+      if (tg) addGroup(tg, Math.min(mX + visibleTargets.length * ((width - mX * 2) / Math.max(visibleTargets.length, 1)), width - mX), height - mY);
+    }
+
+    // Fallback
+    nodes.forEach(n => { if (!result.find(r => r.id === n.id)) result.push({ id: n.id, x: width / 2, y: height / 2, isGroup: false, node: n, radius: 18 }); });
+
+    return result;
+  }, [nodes, analyzedNodes, visibleSources, visibleTargets, commonNodes, groupNodes, dimensions, isLargeNetwork]);
+
+  const groupMemberMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    groupNodes.forEach(g => g.members.forEach(mb => { m[mb.id] = g.id; }));
+    return m;
+  }, [groupNodes]);
+
+  const resolveId = (id: string) => groupMemberMap[id] || id;
+
+  const posMap = useMemo(() => {
+    const m: Record<string, { x: number; y: number; r: number }> = {};
+    renderNodes.forEach(rn => { m[rn.id] = { x: draggedPositions[rn.id]?.x ?? rn.x, y: draggedPositions[rn.id]?.y ?? rn.y, r: rn.radius }; });
+    groupNodes.forEach(g => { g.members.forEach(mb => { if (!m[mb.id]) m[mb.id] = m[g.id]; }); });
+    return m;
+  }, [renderNodes, draggedPositions, groupNodes]);
+
+  const getNodeColor = (node: AMLNode, isCommon: boolean) => {
+    if (node.type === "ANALIZADO") {
+      if (node.risk_level === "ALTO") return { fill: "#fee2e2", stroke: "#ef4444" };
+      if (node.risk_level === "MEDIO") return { fill: "#fef3c7", stroke: "#f59e0b" };
+      return { fill: "#d1fae5", stroke: "#10b981" };
+    }
+    if (isCommon) return { fill: "#dbeafe", stroke: "#3b82f6" };
+    const sends = edges.some(e => e.source === node.id && e.target === currentCuit);
+    const receives = edges.some(e => e.source === currentCuit && e.target === node.id);
+    if (sends && receives) return { fill: "#fef9c3", stroke: "#ea580c" };
+    if (sends) return { fill: "#d1fae5", stroke: "#22c55e" };
+    if (receives) return { fill: "#ffedd5", stroke: "#f97316" };
+    return { fill: "#f4f4f5", stroke: "#94a3b8" };
   };
 
-  // Drag and pan handler
+  const getEdgeStyle = (edge: AMLEdge) => {
+    const srcId = resolveId(edge.source);
+    const tgtId = resolveId(edge.target);
+    const srcRn = renderNodes.find(r => r.id === srcId);
+    const tgtRn = renderNodes.find(r => r.id === tgtId);
+    if (srcRn?.node?.type === "ANALIZADO") return { color: "#f97316", arrow: "arrow-orange" };
+    if (tgtRn?.node?.type === "ANALIZADO") return { color: "#22c55e", arrow: "arrow-green" };
+    return { color: "#94a3b8", arrow: "arrow-default" };
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).tagName === "circle" || (e.target as HTMLElement).tagName === "text") {
-      return; // Do not pan when clicking a node directly
-    }
+    const tag = (e.target as HTMLElement).tagName;
+    if (["circle", "text", "tspan"].includes(tag)) return;
     setIsDragging(true);
     setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-  };
-
-  const handleNodeMouseDown = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    setDraggedNodeId(id);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (draggedNodeId) {
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      
-      // Calculate inverse relative coords of mouse inside zoom/pan SVG space
-      const graphX = (mouseX - pan.x) / zoom;
-      const graphY = (mouseY - pan.y) / zoom;
-      
-      setDraggedPositions(prev => ({
-        ...prev,
-        [draggedNodeId]: { x: graphX, y: graphY }
-      }));
+      setDraggedPositions(prev => ({ ...prev, [draggedNodeId]: { x: (e.clientX - rect.left - pan.x) / zoom, y: (e.clientY - rect.top - pan.y) / zoom } }));
     } else if (isDragging) {
-      setPan({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
-      });
+      setPan({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
     }
   };
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    setDraggedNodeId(null);
-  };
-
-  const handleZoom = (direction: "in" | "out") => {
-    setZoom(prev => {
-      if (direction === "in") return Math.min(prev + 0.15, 2.5);
-      return Math.max(prev - 0.15, 0.4);
-    });
-  };
-
-  const resetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-    setDraggedPositions({});
-    onSelectNode(null);
-  };
-
-  // Check if link is related to currently highlighted node
-  const getEdgeOpacity = (edge: AMLEdge) => {
-    if (!selectedNodeId) return "opacity-90 stroke-zinc-400 stroke-[2.2px]";
-    if (edge.source === selectedNodeId || edge.target === selectedNodeId) {
-      return "opacity-100 stroke-zinc-950 stroke-[4px]";
-    }
-    return "opacity-75 stroke-zinc-300 stroke-[1.8px]";
-  };
+  const handleMouseUp = () => { setIsDragging(false); setDraggedNodeId(null); };
 
   return (
     <div id="network-sec" className="w-full">
-      {/* Visual Canvas Panel */}
       <div className="w-full border border-zinc-200 bg-zinc-50 rounded-xl overflow-hidden relative shadow-inner">
-        
-        {/* Canvas Toolbar Info */}
-        <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2 pointer-events-auto">
+
+        {/* Header badge */}
+        <div className="absolute top-4 left-4 z-10 pointer-events-none">
           <div className="bg-white/95 backdrop-blur-sm border border-zinc-200 text-xs px-3 py-1.5 rounded-full font-medium text-zinc-700 shadow-sm flex items-center gap-1.5">
             <Users className="w-3.5 h-3.5 text-zinc-500" />
             <span>{nodes.length} Nodos</span>
             <span className="text-zinc-300">|</span>
             <ArrowRightLeft className="w-3.5 h-3.5 text-zinc-500" />
             <span>{edges.length} Relaciones</span>
+            {isLargeNetwork && <span className="ml-1 text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">RED GRANDE</span>}
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Controls */}
         <div className="absolute top-4 right-4 z-10 flex gap-1.5">
-          <button
-            onClick={() => handleZoom("in")}
-            title="Aumentar Zoom"
-            className="p-2 bg-white/95 backdrop-blur-sm hover:bg-zinc-100 border border-zinc-200 rounded-lg shadow-sm text-zinc-700 transition cursor-pointer flex items-center justify-center"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => handleZoom("out")}
-            title="Reducir Zoom"
-            className="p-2 bg-white/95 backdrop-blur-sm hover:bg-zinc-100 border border-zinc-200 rounded-lg shadow-sm text-zinc-700 transition cursor-pointer flex items-center justify-center"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-          <button
-            onClick={resetView}
-            title="Restaurar Vista"
-            className="p-2 bg-white/95 backdrop-blur-sm hover:bg-zinc-100 border border-zinc-200 rounded-lg shadow-sm text-zinc-700 transition cursor-pointer flex items-center justify-center"
-          >
+          {[["in", ZoomIn], ["out", ZoomOut]].map(([dir, Icon]: any) => (
+            <button key={dir} onClick={() => setZoom(z => dir === "in" ? Math.min(z + 0.15, 2.5) : Math.max(z - 0.15, 0.4))}
+              className="p-2 bg-white/95 backdrop-blur-sm hover:bg-zinc-100 border border-zinc-200 rounded-lg shadow-sm text-zinc-700 transition cursor-pointer">
+              <Icon className="w-4 h-4" />
+            </button>
+          ))}
+          <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); setDraggedPositions({}); onSelectNode(null); }}
+            className="p-2 bg-white/95 backdrop-blur-sm hover:bg-zinc-100 border border-zinc-200 rounded-lg shadow-sm text-zinc-700 transition cursor-pointer">
             <RotateCcw className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Color Reference Legend */}
-        <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm border border-zinc-200 p-2.5 rounded-lg shadow-sm font-sans flex flex-col gap-2 max-w-[340px] pointer-events-auto">
-          <span className="text-[9px] font-extrabold uppercase tracking-widest text-zinc-500">REFERENCIAS DE COLOR</span>
+        {/* Legend */}
+        <div className="absolute bottom-4 left-4 z-10 bg-white/95 backdrop-blur-sm border border-zinc-200 p-2.5 rounded-lg shadow-sm flex flex-col gap-2 max-w-[280px]">
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-zinc-500">Referencias</span>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[10px] font-bold text-zinc-700">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-[#fee2e2] border-2 border-[#ef4444] block animate-pulse"></span>
-              <span>Sujeto Analizado</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-[#dbeafe] border-2 border-[#3b82f6] block"></span>
-              <span>Contraparte Común</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-[#d1fae5] border-2 border-[#22c55e] block"></span>
-              <span>Envía al Sujeto</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-[#ffedd5] border-2 border-[#f97316] block"></span>
-              <span>Recibe del Sujeto</span>
-            </div>
+            {[
+              ["#fee2e2", "#ef4444", "Sujeto Analizado", false],
+              ["#dbeafe", "#3b82f6", "Contraparte Común", false],
+              ["#d1fae5", "#22c55e", "Envía al Sujeto", false],
+              ["#ffedd5", "#f97316", "Recibe del Sujeto", false],
+            ].map(([fill, stroke, label, _]) => (
+              <div key={label as string} className="flex items-center gap-1.5">
+                <span className="w-3 h-3 rounded-full block flex-shrink-0" style={{ background: fill as string, border: `2px solid ${stroke}` }} />
+                <span>{label as string}</span>
+              </div>
+            ))}
             <div className="flex items-center gap-1.5 col-span-2">
-              <span className="w-3 h-3 rounded-full bg-gradient-to-br from-[#d1fae5] to-[#ffedd5] border-2 border-[#ea580c] block"></span>
-              <span>Envía y Recibe del Sujeto</span>
+              <span className="w-3 h-3 rounded-full block flex-shrink-0 bg-zinc-200" style={{ border: "2px dashed #94a3b8" }} />
+              <span>Grupo contrapartes — click para expandir</span>
             </div>
           </div>
         </div>
 
-        {/* SVG Container Stage */}
-        <div 
-          ref={containerRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          className={`h-[480px] select-none ${isDragging || draggedNodeId ? "cursor-grabbing" : "cursor-grab"}`}
-        >
-          <svg 
-            width="100%" 
-            height="100%"
-            viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
-            className="overflow-visible bg-zinc-50"
-          >
-            {/* Arrow Marker and Gradient Definitions */}
+        {/* Expanded group panel */}
+        {expandedGroup && (() => {
+          const g = groupNodes.find(gn => gn.id === expandedGroup);
+          if (!g) return null;
+          return (
+            <div className="absolute top-14 left-4 z-20 bg-white border border-zinc-200 rounded-xl shadow-xl p-3 w-64 max-h-72 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-600">{g.label}</span>
+                <button onClick={() => setExpandedGroup(null)} className="text-zinc-400 hover:text-zinc-700 font-bold text-xs">✕</button>
+              </div>
+              <div className="text-[10px] text-zinc-500 mb-2">Volumen total: <span className="font-bold text-zinc-800">${g.totalVolume.toLocaleString("es-AR", { maximumFractionDigits: 0 })}</span></div>
+              <ul className="space-y-1.5">
+                {g.members.map(mb => (
+                  <li key={mb.id} className="border-b border-zinc-100 pb-1 last:border-0">
+                    <div className="font-bold text-zinc-800 text-[10px]">{cuitDenominacionesMap?.[mb.id] || mb.label}</div>
+                    <div className="font-mono text-[9px] text-zinc-400">CUIT {mb.id}</div>
+                    <div className="text-[9px] text-zinc-500">${(nodeVolumes[mb.id] || 0).toLocaleString("es-AR", { maximumFractionDigits: 0 })}</div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
+
+        {/* Canvas */}
+        <div ref={containerRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+          className={`h-[500px] select-none ${isDragging || draggedNodeId ? "cursor-grabbing" : "cursor-grab"}`}>
+          <svg width="100%" height="100%" viewBox={`0 0 ${dimensions.width} ${dimensions.height}`} className="overflow-visible bg-zinc-50">
             <defs>
-              <marker
-                id="arrow-default"
-                viewBox="0 0 10 10"
-                refX="6"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="#b4b4b8" />
-              </marker>
-              <marker
-                id="arrow-selected"
-                viewBox="0 0 10 10"
-                refX="6"
-                refY="5"
-                markerWidth="7"
-                markerHeight="7"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="#18181b" />
-              </marker>
-              <marker
-                id="arrow-green"
-                viewBox="0 0 10 10"
-                refX="6"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="#22c55e" />
-              </marker>
-              <marker
-                id="arrow-orange"
-                viewBox="0 0 10 10"
-                refX="6"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 1 L 10 5 L 0 9 z" fill="#f97316" />
-              </marker>
-
-              {/* Dual-color vertical linear gradient representing green (sending) and orange (receiving) */}
-              <linearGradient id="grad-green-orange" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="50%" stopColor="#22c55e" /> {/* green-500 */}
-                <stop offset="50%" stopColor="#f97316" /> {/* orange-500 */}
-              </linearGradient>
+              <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" strokeWidth="1" />
+              </pattern>
+              {(["default:#b4b4b8", "selected:#18181b", "green:#22c55e", "orange:#f97316"] as string[]).map(entry => {
+                const [id, color] = entry.split(":");
+                return (
+                  <marker key={id} id={`arrow-${id}`} viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill={color} />
+                  </marker>
+                );
+              })}
             </defs>
-
-            {/* Grid background representation (aesthetic only) */}
-            <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" strokeWidth="1" />
-            </pattern>
             <rect width="100%" height="100%" fill="url(#grid)" />
 
             <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-              
-              {/* Render Connections (Edges) */}
-              <g id="edges-group">
-                {edges.map((edge) => {
-                  const sourceNode = nodePositions[edge.source];
-                  const targetNode = nodePositions[edge.target];
-                  if (!sourceNode || !targetNode) return null;
+              {/* Edges */}
+              <g>
+                {edges.map(edge => {
+                  const srcId = resolveId(edge.source);
+                  const tgtId = resolveId(edge.target);
+                  if (srcId === tgtId) return null;
+                  const sp = posMap[srcId];
+                  const tp = posMap[tgtId];
+                  if (!sp || !tp) return null;
 
-                  // Take dragged offset into consideration
-                  const sourceX = draggedPositions[edge.source] ? draggedPositions[edge.source].x : sourceNode.x;
-                  const sourceY = draggedPositions[edge.source] ? draggedPositions[edge.source].y : sourceNode.y;
-                  const targetX = draggedPositions[edge.target] ? draggedPositions[edge.target].x : targetNode.x;
-                  const targetY = draggedPositions[edge.target] ? draggedPositions[edge.target].y : targetNode.y;
+                  const isHighlit = !!(selectedNodeId && (resolveId(edge.source) === selectedNodeId || resolveId(edge.target) === selectedNodeId || edge.source === selectedNodeId || edge.target === selectedNodeId));
+                  const isRelated = !selectedNodeId || isHighlit;
+                  const { color, arrow } = getEdgeStyle(edge);
+                  const finalArrow = isHighlit ? "arrow-selected" : arrow;
 
-                  const isHighlit = selectedNodeId && (edge.source === selectedNodeId || edge.target === selectedNodeId);
-                  
-                  // Dynamic link coloring matching custom direction
-                  let edgeColor = "#94a3b8"; // default clean light grey
-                  let arrowId = isHighlit ? "arrow-selected" : "arrow-default";
-                  
-                  if (edge.source === currentCuit) {
-                    edgeColor = "#f97316"; // orange (receives from subject)
-                    arrowId = isHighlit ? "arrow-selected" : "arrow-orange";
-                  } else if (edge.target === currentCuit) {
-                    edgeColor = "#22c55e"; // green (sends to subject)
-                    arrowId = isHighlit ? "arrow-selected" : "arrow-green";
-                  } else {
-                    const isSourceSubject = sourceNode.node.type === "ANALIZADO";
-                    const isTargetSubject = targetNode.node.type === "ANALIZADO";
-                    if (isSourceSubject) {
-                      edgeColor = "#f97316";
-                      arrowId = isHighlit ? "arrow-selected" : "arrow-orange";
-                    } else if (isTargetSubject) {
-                      edgeColor = "#22c55e";
-                      arrowId = isHighlit ? "arrow-selected" : "arrow-green";
-                    }
-                  }
-
-                  const isRelatedToSelection = !selectedNodeId || edge.source === selectedNodeId || edge.target === selectedNodeId;
-                  const strokeWidth = isRelatedToSelection ? (selectedNodeId ? 4.0 : 3.0) : 2.2;
-                  const opacity = isRelatedToSelection ? 0.95 : 0.65;
-
-                  const dx = targetX - sourceX;
-                  const dy = targetY - sourceY;
+                  const dx = tp.x - sp.x, dy = tp.y - sp.y;
                   const dr = Math.sqrt(dx * dx + dy * dy) || 1;
-
-                  // Get actual node sizes to calculate boundary intersections
-                  const isSourceSelected = selectedNodeId === edge.source;
-                  const isTargetSelected = selectedNodeId === edge.target;
-                  const rSource = getNodeRadius(edge.source, isSourceSelected);
-                  const rTarget = getNodeRadius(edge.target, isTargetSelected);
-
-                  // Shorten path coordinates from both start and end circles
-                  const sourceX_short = sourceX + (dx / dr) * (rSource + 1);
-                  const sourceY_short = sourceY + (dy / dr) * (rSource + 1);
-                  const targetX_short = targetX - (dx / dr) * (rTarget + 8); // Extra padding so arrow head sits perfectly outside node body
-                  const targetY_short = targetY - (dy / dr) * (rTarget + 8);
-
-                  // Unique path IDs
-                  const pathId = `edge-path-${edge.id}`;
-                  const textPathId = `edge-text-path-${edge.id}`;
-
-                  // Standard arrow path curve (A -> B curved) using shortened coordinates
-                  const pathD = `M${sourceX_short},${sourceY_short}A${dr * 1.5},${dr * 1.5} 0 0,1 ${targetX_short},${targetY_short}`;
-
-                  // To avoid upside down edge text, if source is to the right of target, inverse start/ends specifically for the text path!
-                  const reverseText = sourceX > targetX;
-                  const startX = reverseText ? targetX_short : sourceX_short;
-                  const startY = reverseText ? targetY_short : sourceY_short;
-                  const endX = reverseText ? sourceX_short : targetX_short;
-                  const endY = reverseText ? sourceY_short : targetY_short;
-                  const sweepFlag = reverseText ? "0" : "1";
-                  const textPathD = `M${startX},${startY}A${dr * 1.5},${dr * 1.5} 0 0,${sweepFlag} ${endX},${endY}`;
+                  const sx = sp.x + (dx / dr) * (sp.r + 2), sy = sp.y + (dy / dr) * (sp.r + 2);
+                  const tx = tp.x - (dx / dr) * (tp.r + 8), ty = tp.y - (dy / dr) * (tp.r + 8);
+                  const pathD = `M${sx},${sy}A${dr * 1.4},${dr * 1.4} 0 0,1 ${tx},${ty}`;
+                  const rev = sp.x > tp.x;
+                  const textPathD = `M${rev ? tx : sx},${rev ? ty : sy}A${dr * 1.4},${dr * 1.4} 0 0,${rev ? "0" : "1"} ${rev ? sx : tx},${rev ? sy : ty}`;
+                  const tpId = `tp-${edge.id}`;
 
                   return (
-                    <g key={edge.id} className="transition-all duration-300">
-                      {/* Visual link path with arrows */}
-                      <path
-                        id={pathId}
-                        d={pathD}
-                        fill="none"
-                        stroke={edgeColor}
-                        strokeWidth={strokeWidth}
-                        style={{ opacity }}
-                        markerEnd={`url(#${arrowId})`}
-                      />
-
-                      {/* Invisible text-specific path tailored to look right side up */}
-                      <path
-                        id={textPathId}
-                        d={textPathD}
-                        fill="none"
-                        stroke="transparent"
-                        className="pointer-events-none"
-                      />
-                      
-                      {/* Amount in thousands displayed above the connection line with a legible white background mask */}
-                      <text
-                        dy="-6"
-                        className="font-mono text-[11px] font-black select-none pointer-events-none"
-                        fill="none"
-                        stroke="#ffffff"
-                        strokeWidth="5"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                        style={{ opacity: isRelatedToSelection ? 1 : 0.65 }}
-                      >
-                        <textPath href={`#${textPathId}`} startOffset="50%" textAnchor="middle">
-                          {Math.round(edge.amount_ars / 1000)} k
-                        </textPath>
+                    <g key={edge.id} style={{ opacity: isRelated ? 1 : 0.3 }} className="transition-opacity duration-200">
+                      <path d={pathD} fill="none" stroke={color} strokeWidth={isHighlit ? 4 : 2.5} markerEnd={`url(#${finalArrow})`} />
+                      <path id={tpId} d={textPathD} fill="none" stroke="transparent" className="pointer-events-none" />
+                      <text dy="-5" fill="none" stroke="#fff" strokeWidth="5" strokeLinejoin="round" fontSize="10" fontWeight="900" className="pointer-events-none select-none">
+                        <textPath href={`#${tpId}`} startOffset="50%" textAnchor="middle">{formatK(edge.amount_ars)}</textPath>
                       </text>
-
-                      <text
-                        dy="-6"
-                        className="font-mono text-[11px] font-bold select-none pointer-events-none"
-                        fill={edgeColor}
-                        style={{ opacity: isRelatedToSelection ? 1 : 0.75 }}
-                      >
-                        <textPath href={`#${textPathId}`} startOffset="50%" textAnchor="middle">
-                          {Math.round(edge.amount_ars / 1000)} k
-                        </textPath>
+                      <text dy="-5" fill={color} fontSize="10" fontWeight="700" className="pointer-events-none select-none">
+                        <textPath href={`#${tpId}`} startOffset="50%" textAnchor="middle">{formatK(edge.amount_ars)}</textPath>
                       </text>
-
-                      {/* Interactive thick hover line */}
-                      <path
-                        d={pathD}
-                        fill="none"
-                        stroke="transparent"
-                        strokeWidth="10"
-                        className="cursor-pointer hover:stroke-zinc-500/10 transition-all"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectNode(edge.source);
-                        }}
-                      >
-                        <title>{`${edge.source} ➔ ${edge.target}\nMonto: $${edge.amount_ars.toLocaleString("es-AR")} ARS\nMotivo: ${edge.alert_reason}`}</title>
+                      <path d={pathD} fill="none" stroke="transparent" strokeWidth="12" className="cursor-pointer"
+                        onClick={e => { e.stopPropagation(); onSelectNode(edge.source); }}>
+                        <title>{`${edge.source} → ${edge.target}\n$${edge.amount_ars.toLocaleString("es-AR")}`}</title>
                       </path>
                     </g>
                   );
                 })}
               </g>
 
-              {/* Render Entity Nodes */}
-              <g id="nodes-group">
-                {(Object.values(nodePositions) as NodePosition[]).map((pos) => {
-                  const isSelected = selectedNodeId === pos.id;
-                  const isSubject = pos.node.type === "ANALIZADO";
+              {/* Nodes */}
+              <g>
+                {renderNodes.map(rn => {
+                  const cx = draggedPositions[rn.id]?.x ?? rn.x;
+                  const cy = draggedPositions[rn.id]?.y ?? rn.y;
+                  const isSelected = selectedNodeId === rn.id;
 
-                  // Realtime node layout overrides from drags
-                  const currentX = draggedPositions[pos.id] ? draggedPositions[pos.id].x : pos.x;
-                  const currentY = draggedPositions[pos.id] ? draggedPositions[pos.id].y : pos.y;
-                  
-                  // Fixed visual radii: Center: 32, Common: 24, Peripheral: 18
-                  const radius = isSubject ? 32 : (pos.id === commonCounterparts?.[0] ? 24 : 18);
-
-                  // Flows-related color customization!
-                  // Subjects stay standard, counterparties changed dynamically based on their interaction with currentCuit
-                  let colorFill = "#f4f4f5"; // default light zinc
-                  let colorStroke = "#94a3b8";
-                  let isGradient = false;
-
-                  const isCommon = commonCounterparts && commonCounterparts.includes(pos.id);
-
-                  if (isSubject) {
-                    if (pos.node.risk_level === "ALTO") {
-                      colorFill = "#fee2e2"; // light red
-                      colorStroke = "#ef4444"; // bright red
-                    } else if (pos.node.risk_level === "MEDIO") {
-                      colorFill = "#fef3c7"; // light amber
-                      colorStroke = "#f59e0b"; // amber
-                    } else {
-                      colorFill = "#d1fae5"; // light green
-                      colorStroke = "#10b981"; // emerald
-                    }
-                  } else if (isCommon) {
-                    colorFill = "#dbeafe"; // light blue
-                    colorStroke = "#3b82f6"; // bright blue
-                  } else {
-                    // Check direct flow relative to currentCuit!
-                    const sendsToTarget = edges.some(e => e.source === pos.id && e.target === currentCuit);
-                    const receivesFromTarget = edges.some(e => e.source === currentCuit && e.target === pos.id);
-
-                    if (sendsToTarget && receivesFromTarget) {
-                      isGradient = true;
-                      colorFill = "url(#grad-green-orange)";
-                      colorStroke = "#ea580c"; // bright orange
-                    } else if (sendsToTarget) {
-                      colorFill = "#d1fae5"; // light green
-                      colorStroke = "#22c55e"; // bright green
-                    } else if (receivesFromTarget) {
-                      colorFill = "#ffedd5"; // light orange
-                      colorStroke = "#f97316"; // bright orange
-                    } else {
-                      colorFill = "#f4f4f5"; // neutral zinc
-                      colorStroke = "#94a3b8"; // zinc-400
-                    }
+                  if (rn.isGroup && rn.group) {
+                    const g = rn.group;
+                    return (
+                      <g key={rn.id} transform={`translate(${cx}, ${cy})`} className="cursor-pointer"
+                        onClick={e => { e.stopPropagation(); setExpandedGroup(expandedGroup === g.id ? null : g.id); }}>
+                        <circle r={rn.radius} fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="5,3" className="hover:fill-zinc-200 transition-all" />
+                        <text textAnchor="middle" dy="4" fontSize="11" fontWeight="700" fill="#64748b" className="pointer-events-none select-none">{g.members.length}</text>
+                        <g transform={`translate(0, ${rn.radius + 12})`} className="pointer-events-none select-none">
+                          <text textAnchor="middle" fontSize="8" fontWeight="600" fill="#64748b">{g.label}</text>
+                          <text textAnchor="middle" y="11" fontSize="8" fill="#94a3b8">{formatK(g.totalVolume)} total</text>
+                          <text textAnchor="middle" y="22" fontSize="8" fill="#3b82f6">▼ ver detalle</text>
+                        </g>
+                      </g>
+                    );
                   }
 
+                  if (!rn.node) return null;
+                  const isCommon = commonCounterparts.includes(rn.id);
+                  const isSubject = rn.node.type === "ANALIZADO";
+                  const { fill, stroke } = getNodeColor(rn.node, isCommon);
+                  const name = cuitDenominacionesMap?.[rn.id] || rn.node.label || (isSubject ? "Sujeto" : "Contraparte");
+                  const lines = wrapText(name, isSubject ? 16 : 13);
+
                   return (
-                    <g 
-                      key={pos.id} 
-                      transform={`translate(${currentX}, ${currentY})`}
-                      className="cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectNode(isSelected ? null : pos.id);
-                      }}
-                      onMouseDown={(e) => handleNodeMouseDown(e, pos.id)}
-                    >
-                      {/* Outer Selection Highlight Ring */}
+                    <g key={rn.id} transform={`translate(${cx}, ${cy})`} className="cursor-pointer"
+                      onClick={e => { e.stopPropagation(); onSelectNode(isSelected ? null : rn.id); }}
+                      onMouseDown={e => { e.stopPropagation(); setDraggedNodeId(rn.id); }}>
                       {isSelected && (
-                        <circle
-                          r={radius + 6}
-                          fill="none"
-                          stroke="#71717a"
-                          strokeWidth="1.5"
-                          strokeDasharray="4,2"
-                          className="animate-spin"
-                          style={{ animationDuration: "12s" }}
-                        />
+                        <circle r={rn.radius + 6} fill="none" stroke="#71717a" strokeWidth="1.5" strokeDasharray="4,2"
+                          className="animate-spin" style={{ animationDuration: "12s" }} />
                       )}
-
-                      {/* Node Circle Shape representing CUIT */}
-                      <circle
-                        r={radius}
-                        className="transition-all duration-150 hover:scale-110 shadow-sm"
-                        fill={colorFill}
-                        stroke={colorStroke}
-                        strokeWidth={isSubject ? "3.5" : "1.75"}
-                      />
-
-                      {/* Multiline information below circle */}
-                      <g transform={`translate(0, ${radius + 14})`} className="pointer-events-none select-none text-center">
-                        {(() => {
-                          const name = cuitDenominacionesMap?.[pos.id] || pos.node.label || (isSubject ? "Sujeto de Análisis" : "Contraparte");
-                          const wrappedLines = wrapText(name, 18);
-                          return (
-                            <>
-                              {/* Full Denomination */}
-                              <text
-                                textAnchor="middle"
-                                className={`font-sans ${isSubject ? "text-[10px] font-extrabold fill-zinc-900" : "text-[8.5px] sm:text-[9px] font-bold fill-zinc-800"}`}
-                              >
-                                {wrappedLines.map((line, i) => (
-                                  <tspan x="0" dy={i === 0 ? 0 : 10} key={i}>
-                                    {line}
-                                  </tspan>
-                                ))}
-                              </text>
-
-                              {/* Full CUIT */}
-                              <text
-                                textAnchor="middle"
-                                y={wrappedLines.length * 10 + 2}
-                                className={`font-mono ${isSubject ? "text-[9px]" : "text-[8px]"} font-semibold fill-zinc-500`}
-                              >
-                                CUIT {pos.id}
-                              </text>
-                            </>
-                          );
-                        })()}
+                      <circle r={rn.radius} fill={fill} stroke={stroke} strokeWidth={isSubject ? 3 : 1.75}
+                        className="transition-all duration-150 hover:scale-110" />
+                      <g transform={`translate(0, ${rn.radius + 13})`} className="pointer-events-none select-none">
+                        <text textAnchor="middle" fontSize={isSubject ? 10 : 8.5} fontWeight={isSubject ? "800" : "600"} fill="#18181b">
+                          {lines.map((line, i) => <tspan key={i} x="0" dy={i === 0 ? 0 : 10}>{line}</tspan>)}
+                        </text>
+                        <text textAnchor="middle" y={lines.length * 10 + 2} fontSize={isSubject ? 9 : 8} fill="#71717a" fontFamily="monospace">
+                          CUIT {rn.id}
+                        </text>
                       </g>
                     </g>
                   );
                 })}
               </g>
-
             </g>
           </svg>
         </div>
-
       </div>
     </div>
   );
