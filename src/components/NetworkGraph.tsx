@@ -336,13 +336,17 @@ export default function NetworkGraph({
             <div className="mt-1 bg-white/95 backdrop-blur-sm border border-zinc-200 p-2.5 rounded-lg shadow-md flex flex-col gap-1.5">
               {legendItems.map(([fill, stroke, label]) => (
                 <div key={label} className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700">
-                  <span className="w-3 h-3 rounded-full flex-shrink-0 inline-block" style={{ backgroundColor: fill, border: `2px solid ${stroke}` }} />
+                  <svg width="14" height="14" className="flex-shrink-0">
+                    <circle cx="7" cy="7" r="6" fill={fill} stroke={stroke} strokeWidth="2" />
+                  </svg>
                   <span>{label}</span>
                 </div>
               ))}
               <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-700">
-                <span className="w-3 h-3 rounded-full flex-shrink-0 bg-zinc-100" style={{ border: "2px dashed #94a3b8" }} />
-                Grupo — click para expandir
+                <svg width="14" height="14" className="flex-shrink-0">
+                  <circle cx="7" cy="7" r="6" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.5" strokeDasharray="3,2" />
+                </svg>
+                <span>Grupo — click para expandir</span>
               </div>
             </div>
           )}
