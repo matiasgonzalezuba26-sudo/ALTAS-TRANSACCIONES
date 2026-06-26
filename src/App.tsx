@@ -781,12 +781,9 @@ export default function App() {
         if (arcaWarnings.length > 0) {
           const preview = arcaWarnings.slice(0, 5)
             .map(w => `Fila ${w.fila} · ${w.campo}: ${w.detalle}`)
-            .join("
-");
-          const extra = arcaWarnings.length > 5 ? `
-...y ${arcaWarnings.length - 5} problema${arcaWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
-          showToast(`⚠️ ${arcaWarnings.length} problema${arcaWarnings.length > 1 ? "s" : ""} en el padrón ARCA:
-${preview}${extra}`, "error");
+            .join("\n");
+          const extra = arcaWarnings.length > 5 ? `\n...y ${arcaWarnings.length - 5} problema${arcaWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
+          showToast(`⚠️ ${arcaWarnings.length} problema${arcaWarnings.length > 1 ? "s" : ""} en el padrón ARCA:\n${preview}${extra}`, "error");
         }
 
         if (selectedPresetId !== "custom") {
@@ -912,12 +909,9 @@ ${preview}${extra}`, "error");
         if (opsWarnings.length > 0) {
           const preview = opsWarnings.slice(0, 5)
             .map(w => `Fila ${w.fila}${w.cuit ? ` · CUIT ${w.cuit}` : ""} · ${w.campo}: ${w.detalle}`)
-            .join("
-");
-          const extra = opsWarnings.length > 5 ? `
-...y ${opsWarnings.length - 5} problema${opsWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
-          showToast(`⚠️ ${opsWarnings.length} problema${opsWarnings.length > 1 ? "s" : ""} en operaciones:
-${preview}${extra}`, "error");
+            .join("\n");
+          const extra = opsWarnings.length > 5 ? `\n...y ${opsWarnings.length - 5} problema${opsWarnings.length - 5 > 1 ? "s" : ""} más.` : "";
+          showToast(`⚠️ ${opsWarnings.length} problema${opsWarnings.length > 1 ? "s" : ""} en operaciones:\n${preview}${extra}`, "error");
         }
 
         if (selectedPresetId !== "custom") {
@@ -1454,14 +1448,7 @@ ${preview}${extra}`, "error");
       <header className="bg-white border-b border-zinc-200/80 px-6 py-4 shadow-xs relative">
         {/* Floating Toast Notification HUD inside sandboxed interface */}
         {toast && (
-          <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4.5 py-3 rounded-xl border shadow-lg text-xs font-bold font-sans animate-bounce transition-all duration-300
-            ${toast.type === "success" 
-              ? "bg-emerald-950/95 border-emerald-500/30 text-emerald-300" 
-              : toast.type === "error"
-                ? "bg-rose-950/95 border-rose-500/30 text-rose-300"
-                : "bg-zinc-950/95 border-zinc-500/30 text-zinc-300"
-            }
-          `}>
+          <div className={`fixed top-4 right-4 z-50 flex items-center gap-3 px-4.5 py-3 rounded-xl border shadow-lg text-xs font-bold font-sans animate-bounce transition-all duration-300\n            ${toast.type === "success" \n              ? "bg-emerald-950/95 border-emerald-500/30 text-emerald-300" \n              : toast.type === "error"\n                ? "bg-rose-950/95 border-rose-500/30 text-rose-300"\n                : "bg-zinc-950/95 border-zinc-500/30 text-zinc-300"\n            }\n          `}>
             <span className="flex h-2 w-2 relative">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${toast.type === "success" ? "bg-emerald-400" : toast.type === "error" ? "bg-rose-400" : "bg-amber-400"}`}></span>
               <span className={`relative inline-flex rounded-full h-2 w-2 ${toast.type === "success" ? "bg-emerald-500" : toast.type === "error" ? "bg-rose-500" : "bg-amber-500"}`}></span>
@@ -1598,12 +1585,7 @@ ${preview}${extra}`, "error");
           <button
             id="tab-alertas"
             onClick={() => setActiveTab("alertas")}
-            className={`py-3 px-4 text-xs font-bold transition-all relative flex items-center gap-2 border-b-2 cursor-pointer
-              ${activeTab === "alertas" 
-                ? "border-zinc-900 text-zinc-900 font-black bg-zinc-200/40" 
-                : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"
-              }
-            `}
+            className={`py-3 px-4 text-xs font-bold transition-all relative flex items-center gap-2 border-b-2 cursor-pointer\n              ${activeTab === "alertas" \n                ? "border-zinc-900 text-zinc-900 font-black bg-zinc-200/40" \n                : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"\n              }\n            `}
           >
             <ShieldAlert className="w-4 h-4 text-rose-500" />
             <span>Reporte y Carga de Datos</span>
@@ -1617,12 +1599,7 @@ ${preview}${extra}`, "error");
           <button
             id="tab-forense"
             onClick={() => setActiveTab("forense")}
-            className={`py-3 px-4 text-xs font-bold transition-all relative flex items-center gap-2 border-b-2 cursor-pointer
-              ${activeTab === "forense" 
-                ? "border-zinc-900 text-zinc-900 font-black bg-zinc-200/40" 
-                : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"
-              }
-            `}
+            className={`py-3 px-4 text-xs font-bold transition-all relative flex items-center gap-2 border-b-2 cursor-pointer\n              ${activeTab === "forense" \n                ? "border-zinc-900 text-zinc-900 font-black bg-zinc-200/40" \n                : "border-transparent text-zinc-500 hover:text-zinc-800 hover:border-zinc-300"\n              }\n            `}
           >
             <TrendingUp className="w-4 h-4 text-zinc-600" />
             <span>FLUJO INDIVIDUAL / GRUPAL</span>
@@ -1685,9 +1662,7 @@ ${preview}${extra}`, "error");
 
                 {/* KPI 2 : Casos Positivos */}
                 <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-2xs flex items-center gap-3.5">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-extrabold font-mono text-sm text-white shadow-inner
-                    ${positiveCases.length > 0 ? "bg-rose-600 animate-pulse" : "bg-emerald-600"}
-                  `}>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-extrabold font-mono text-sm text-white shadow-inner\n                    ${positiveCases.length > 0 ? "bg-rose-600 animate-pulse" : "bg-emerald-600"}\n                  `}>
                     {positiveCases.length}
                   </div>
                   <div>
@@ -2154,21 +2129,13 @@ ${preview}${extra}`, "error");
                       <div className="flex items-center bg-zinc-100 p-0.5 rounded-lg border border-zinc-200 shrink-0">
                         <button
                           onClick={() => setForensicMode("individual")}
-                          className={`px-3 py-1 rounded-md text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer select-none ${
-                            forensicMode === "individual"
-                              ? "bg-white text-zinc-900 shadow-2xs border border-zinc-200 font-black"
-                              : "text-zinc-500 hover:text-zinc-850"
-                          }`}
+                          className={`px-3 py-1 rounded-md text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer select-none ${\n                            forensicMode === "individual"\n                              ? "bg-white text-zinc-900 shadow-2xs border border-zinc-200 font-black"\n                              : "text-zinc-500 hover:text-zinc-850"\n                          }`}
                         >
                           Individual
                         </button>
                         <button
                           onClick={() => setForensicMode("grupal")}
-                          className={`px-3 py-1 rounded-md text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer select-none relative ${
-                            forensicMode === "grupal"
-                              ? "bg-white text-zinc-900 shadow-2xs border border-zinc-200 font-black"
-                              : "text-zinc-500 hover:text-zinc-850"
-                          }`}
+                          className={`px-3 py-1 rounded-md text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer select-none relative ${\n                            forensicMode === "grupal"\n                              ? "bg-white text-zinc-900 shadow-2xs border border-zinc-200 font-black"\n                              : "text-zinc-500 hover:text-zinc-850"\n                          }`}
                         >
                           <span>Grupal</span>
                           {detectedGroupFlows.length > 0 && (
@@ -2693,5 +2660,6 @@ ${preview}${extra}`, "error");
     </div>
   );
 }
+
 
 
