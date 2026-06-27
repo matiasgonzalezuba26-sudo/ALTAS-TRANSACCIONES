@@ -255,10 +255,11 @@ export default function NetworkGraph({
   const getNodeColor = (node: AMLNode, isCommon: boolean) => {
     // Contraparte común siempre azul, tiene prioridad sobre el tipo
     if (isCommon) return { fill: "#dbeafe", stroke: "#3b82f6" };
+    // Sujetos analizados siempre rosa/rojo — el riesgo se refleja solo en el stroke
     if (node.type === "ANALIZADO") {
       if (node.risk_level === "ALTO") return { fill: "#fee2e2", stroke: "#ef4444" };
-      if (node.risk_level === "MEDIO") return { fill: "#fef3c7", stroke: "#f59e0b" };
-      return { fill: "#d1fae5", stroke: "#10b981" };
+      if (node.risk_level === "MEDIO") return { fill: "#fee2e2", stroke: "#f59e0b" };
+      return { fill: "#fee2e2", stroke: "#ef4444" };
     }
     const sends = edges.some(e => e.source === node.id);
     const receives = edges.some(e => e.target === node.id);
