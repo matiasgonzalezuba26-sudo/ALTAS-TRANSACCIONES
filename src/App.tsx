@@ -2562,37 +2562,30 @@ export default function App() {
                         const subjects = activeGroup.subjects;
                         const hasCommonCounterparts = activeGroup.commonCounterparts.length > 0;
                         const TOP_CP = 4;
-                        const commonSet = new Set(activeGroup.commonCounterparts);
 
-                        // Filtrar ordenaList y recibeList a solo las contrapartes comunes, ordenadas por volumen
-                        const cpAsOrdena = ordenaList.filter(x => commonSet.has(x.cuit));
-                        const cpAsRecibe = recibeList.filter(x => commonSet.has(x.cuit));
-
-                        // % sobre el subtotal de las comunes (no sobre el total general)
-                        const cpOrdenaSubtotal = cpAsOrdena.reduce((s, x) => s + x.sum, 0);
-                        const cpRecibeSubtotal = cpAsRecibe.reduce((s, x) => s + x.sum, 0);
-
-                        const buildCPLine = (items: {cuit: string; denom: string; sum: number}[], subtotal: number) => {
+                        // ORDENANTES = top de FONDOS ENTRANTES (recibeList): envían plata a los sujetos
+                        // RECEPTORAS = top de EGRESOS (ordenaList): reciben plata de los sujetos
+                        const buildCPLine = (items: {cuit: string; denom: string; sum: number}[], total: number) => {
                           const main = items.slice(0, TOP_CP);
                           const rest = items.slice(TOP_CP);
                           const mainTxt = main.map(x => {
                             const name = cuitDenominacionesMap[x.cuit] || x.denom;
-                            const pct = subtotal > 0 ? ((x.sum / subtotal) * 100).toFixed(1) : "0.0";
+                            const pct = total > 0 ? ((x.sum / total) * 100).toFixed(1) : "0.0";
                             return `${name} (CUIT ${x.cuit}) ${pct}%`;
                           }).join(", ");
                           const restVol = rest.reduce((s, x) => s + x.sum, 0);
-                          const restPct = subtotal > 0 ? ((restVol / subtotal) * 100).toFixed(1) : "0.0";
+                          const restPct = total > 0 ? ((restVol / total) * 100).toFixed(1) : "0.0";
                           const restTxt = rest.length > 0
                             ? `; el resto (${rest.length} empresa${rest.length !== 1 ? "s" : ""}) representa el ${restPct}%`
                             : "";
                           return mainTxt + restTxt;
                         };
 
-                        const ordenaLine = cpAsOrdena.length > 0
-                          ? buildCPLine(cpAsOrdena, cpOrdenaSubtotal)
+                        const ordenaLine = recibeList.length > 0
+                          ? buildCPLine(recibeList, recibeTotal)
                           : null;
-                        const recibeLine = cpAsRecibe.length > 0
-                          ? buildCPLine(cpAsRecibe, cpRecibeSubtotal)
+                        const recibeLine = ordenaList.length > 0
+                          ? buildCPLine(ordenaList, ordenaTotal)
                           : null;
 
                         const allCPsFull = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
