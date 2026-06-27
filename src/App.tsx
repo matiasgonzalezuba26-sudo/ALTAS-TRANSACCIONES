@@ -2561,36 +2561,38 @@ export default function App() {
                       (() => {
                         const subjects = activeGroup.subjects;
                         const hasCommonCounterparts = activeGroup.commonCounterparts.length > 0;
-                        const TOP_CP = 3;
+                        const TOP_CP = 4;
+                        const commonSet = new Set(activeGroup.commonCounterparts);
 
-                        // Calcular volumen y % por contraparte común como ORDENANTE (recibe fondos del sujeto = ordenaList)
-                        // y como RECEPTORA (envía fondos al sujeto = recibeList)
-                        const cpOrdenaMap = Object.fromEntries(ordenaList.map(x => [x.cuit, x]));
-                        const cpRecibeMap = Object.fromEntries(recibeList.map(x => [x.cuit, x]));
+                        // Filtrar ordenaList y recibeList a solo las contrapartes comunes, ordenadas por volumen
+                        const cpAsOrdena = ordenaList.filter(x => commonSet.has(x.cuit));
+                        const cpAsRecibe = recibeList.filter(x => commonSet.has(x.cuit));
 
-                        const cpOrdenaTotal = activeGroup.commonCounterparts.reduce((s, c) => s + (cpOrdenaMap[c]?.sum || 0), 0);
-                        const cpRecibeTotal = activeGroup.commonCounterparts.reduce((s, c) => s + (cpRecibeMap[c]?.sum || 0), 0);
+                        // % sobre el subtotal de las comunes (no sobre el total general)
+                        const cpOrdenaSubtotal = cpAsOrdena.reduce((s, x) => s + x.sum, 0);
+                        const cpRecibeSubtotal = cpAsRecibe.reduce((s, x) => s + x.sum, 0);
 
-                        const buildCPLine = (cuits: string[], volMap: Record<string, {sum: number; denom: string}>, total: number) => {
-                          const main = cuits.slice(0, TOP_CP);
-                          const rest = cuits.slice(TOP_CP);
-                          const mainTxt = main.map(c => {
-                            const name = cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte");
-                            const vol = volMap[c]?.sum || 0;
-                            const pct = total > 0 ? ((vol / total) * 100).toFixed(1) : "0.0";
-                            return `${name} (CUIT ${c}) ${pct}%`;
+                        const buildCPLine = (items: {cuit: string; denom: string; sum: number}[], subtotal: number) => {
+                          const main = items.slice(0, TOP_CP);
+                          const rest = items.slice(TOP_CP);
+                          const mainTxt = main.map(x => {
+                            const name = cuitDenominacionesMap[x.cuit] || x.denom;
+                            const pct = subtotal > 0 ? ((x.sum / subtotal) * 100).toFixed(1) : "0.0";
+                            return `${name} (CUIT ${x.cuit}) ${pct}%`;
                           }).join(", ");
-                          const restVol = rest.reduce((s, c) => s + (volMap[c]?.sum || 0), 0);
-                          const restPct = total > 0 ? ((restVol / total) * 100).toFixed(1) : "0.0";
-                          const restTxt = rest.length > 0 ? `; el resto (${rest.length} empresa${rest.length !== 1 ? "s" : ""}) representa el ${restPct}%` : "";
+                          const restVol = rest.reduce((s, x) => s + x.sum, 0);
+                          const restPct = subtotal > 0 ? ((restVol / subtotal) * 100).toFixed(1) : "0.0";
+                          const restTxt = rest.length > 0
+                            ? `; el resto (${rest.length} empresa${rest.length !== 1 ? "s" : ""}) representa el ${restPct}%`
+                            : "";
                           return mainTxt + restTxt;
                         };
 
-                        const ordenaLine = hasCommonCounterparts && cpOrdenaTotal > 0
-                          ? buildCPLine(activeGroup.commonCounterparts, cpOrdenaMap, ordenaTotal)
+                        const ordenaLine = cpAsOrdena.length > 0
+                          ? buildCPLine(cpAsOrdena, cpOrdenaSubtotal)
                           : null;
-                        const recibeLine = hasCommonCounterparts && cpRecibeTotal > 0
-                          ? buildCPLine(activeGroup.commonCounterparts, cpRecibeMap, recibeTotal)
+                        const recibeLine = cpAsRecibe.length > 0
+                          ? buildCPLine(cpAsRecibe, cpRecibeSubtotal)
                           : null;
 
                         const allCPsFull = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
