@@ -451,20 +451,25 @@ export default function NetworkGraph({
                 if (rn.isGroup && rn.group) {
                   const g = rn.group;
                   const isAnalyzedGroup = g.id === "__group_analyzed__";
+                  const isSrcGroup = g.id === "__group_src__";
+                  const isTgtGroup = g.id === "__group_tgt__";
+                  const groupFill = isAnalyzedGroup ? "#fee2e2" : isSrcGroup ? "#d1fae5" : isTgtGroup ? "#ffedd5" : "#f1f5f9";
+                  const groupStroke = isAnalyzedGroup ? "#ef4444" : isSrcGroup ? "#22c55e" : isTgtGroup ? "#f97316" : "#94a3b8";
+                  const groupTextColor = isAnalyzedGroup ? "#ef4444" : isSrcGroup ? "#15803d" : isTgtGroup ? "#c2410c" : "#64748b";
                   return (
                     <g key={rn.id} transform={`translate(${cx}, ${cy})`} className="cursor-pointer"
                       onClick={e => { e.stopPropagation(); setExpandedGroup(expandedGroup === g.id ? null : g.id); }}
                     onMouseDown={e => { e.stopPropagation(); setDraggedNodeId(rn.id); }}>
-                      <circle r={rn.radius} fill={isAnalyzedGroup ? "#fee2e2" : "#f1f5f9"}
-                        stroke={isAnalyzedGroup ? "#ef4444" : "#94a3b8"}
+                      <circle r={rn.radius} fill={groupFill}
+                        stroke={groupStroke}
                         strokeWidth="1.5" strokeDasharray="5,3"
                         className="hover:opacity-80 transition-all" />
                       <text textAnchor="middle" dy="4" fontSize="11" fontWeight="800"
-                        fill={isAnalyzedGroup ? "#ef4444" : "#64748b"} className="pointer-events-none select-none">
+                        fill={groupTextColor} className="pointer-events-none select-none">
                         {g.members.length}
                       </text>
                       <g transform={`translate(0, ${rn.radius + 12})`} className="pointer-events-none select-none">
-                        <text textAnchor="middle" fontSize="8" fontWeight="700" fill={isAnalyzedGroup ? "#ef4444" : "#64748b"}>{g.label}</text>
+                        <text textAnchor="middle" fontSize="8" fontWeight="700" fill={groupTextColor}>{g.label}</text>
                         <text textAnchor="middle" y="11" fontSize="8" fill="#94a3b8">{formatK(g.totalVolume)}</text>
                         <text textAnchor="middle" y="21" fontSize="8" fill="#3b82f6">▼ ver detalle</text>
                       </g>
