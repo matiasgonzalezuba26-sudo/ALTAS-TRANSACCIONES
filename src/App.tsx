@@ -2276,13 +2276,13 @@ export default function App() {
                 </div>
  
                 {forensicMode === "grupal" && activeGroup && (
-                  <div className="bg-amber-50/50 border border-amber-200 rounded-lg p-3.5 mb-4 text-xs text-amber-900 leading-relaxed font-normal">
-                    <strong className="text-amber-950 uppercase font-black text-[10px] block tracking-wider mb-1">
+                  <div className="bg-amber-50/50 border border-amber-200 rounded-lg p-4 mb-4 text-[13px] text-amber-900 leading-snug font-normal">
+                    <strong className="text-amber-950 uppercase font-black text-[11px] block tracking-wider mb-1.5">
                       💡 ¿QUÉ INCLUYE ESTA SECCIÓN DE ANÁLISIS CONSOLIDADO GRUPAL?
                     </strong>
-                    Este panel fusiona la totalidad de los flujos de fondos correspondientes a todos los sujetos analizados del grupo. 
-                    Muestra consolidado los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red. 
-                    Permite visualizar de manera inmediata cómo el nodo común (como <span className="font-bold underline">{activeGroup.commonCounterparts.map(c => cuitDenominacionesMap[c] || c).join(", ")}</span>) actúa como el vaso comunicante o canal amortiguador que unifica e interconecta las operaciones financieras del grupo.
+                    Este panel fusiona la totalidad de los flujos de fondos correspondientes a todos los sujetos analizados del grupo.
+                    Muestra consolidado los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
+                    Permite visualizar de manera inmediata nodos en común — en total <strong>{activeGroup.commonCounterparts.length} empresa{activeGroup.commonCounterparts.length !== 1 ? "s" : ""}</strong> — que actúan como el vaso comunicante que unifica e interconecta las operaciones financieras del grupo.
                   </div>
                 )}
 
@@ -2595,7 +2595,7 @@ export default function App() {
                             
                             {/* Group header */}
                             <div>
-                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
+                              <span className="text-[11px] uppercase font-bold text-zinc-500 block tracking-widest">
                                 Grupo Bajo Análisis
                               </span>
                               <span className="font-extrabold text-sm text-blue-400 block mt-0.5">
@@ -2608,12 +2608,12 @@ export default function App() {
 
                             {/* Subject Grid/Table Box */}
                             <div>
-                              <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                              <span className="text-[11px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
                                 Sujetos Involucrados (Alta Reciente)
                               </span>
                               <div className="border border-zinc-800 rounded bg-zinc-900/60 overflow-hidden font-sans">
                                 {/* Header row */}
-                                <div className="grid grid-cols-12 text-[8px] uppercase font-black text-zinc-500 bg-zinc-900 p-2 border-b border-zinc-800">
+                                <div className="grid grid-cols-12 text-[10px] uppercase font-black text-zinc-500 bg-zinc-900 px-3 py-2 border-b border-zinc-800">
                                   <div className="col-span-4 font-black">CUIT</div>
                                   <div className="col-span-5 font-black">Denominación</div>
                                   <div className="col-span-3 text-right font-black">FECHA</div>
@@ -2624,7 +2624,7 @@ export default function App() {
                                     const labelName = cuitDenominacionesMap[cuit] || getArgentineFallbackName(cuit, "Sujeto");
                                     const alta = cuitAltaDatesMap[cuit] || "N/A";
                                     return (
-                                      <div key={cuit} className="grid grid-cols-12 text-[10px] font-medium text-zinc-200 p-2 border-b border-zinc-900/50 last:border-0 hover:bg-zinc-900/40">
+                                      <div key={cuit} className="grid grid-cols-12 text-[12px] font-medium text-zinc-200 px-3 py-1.5 border-b border-zinc-900/50 last:border-0 hover:bg-zinc-900/40">
                                         <div className="col-span-4 font-mono font-bold text-amber-300 select-all">{cuit}</div>
                                         <div className="col-span-5 truncate font-sans text-zinc-100 pr-1" title={labelName}>{labelName}</div>
                                         <div className="col-span-3 font-mono text-right text-zinc-400">{alta}</div>
