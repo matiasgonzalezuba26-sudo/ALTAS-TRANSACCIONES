@@ -2315,7 +2315,7 @@ export default function App() {
                           <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
                               <thead>
-                                <tr className="border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                                <tr className="border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
                                   <th className="pb-1.5 font-bold">CUIT</th>
                                   <th className="pb-1.5 font-bold">Denominación</th>
                                   <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
@@ -2323,18 +2323,18 @@ export default function App() {
                               </thead>
                               <tbody>
                                 {visible.map((item, idx) => (
-                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[12px]">
-                                    <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
-                                    <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
-                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
+                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[13px]">
+                                    <td className="py-1.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
+                                    <td className="py-1.5 text-zinc-700 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
+                                    <td className="py-1.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
                                   </tr>
                                 ))}
                                 {rest.length > 0 && (
-                                  <tr className="border-t border-zinc-300 bg-zinc-100/60 text-[12px]">
-                                    <td className="py-2.5 font-mono text-zinc-500 font-semibold" colSpan={2}>
+                                  <tr className="border-t border-zinc-200 bg-zinc-50 text-[13px]">
+                                    <td className="py-1.5 font-mono text-zinc-700 font-semibold" colSpan={2}>
                                       Resto — {rest.length} empresa{rest.length !== 1 ? "s" : ""}
                                     </td>
-                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-600">{formatInThousands(restTotal)}</td>
+                                    <td className="py-1.5 text-right font-mono font-bold text-zinc-700">{formatInThousands(restTotal)}</td>
                                   </tr>
                                 )}
                               </tbody>
@@ -2379,7 +2379,7 @@ export default function App() {
                           <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
                               <thead>
-                                <tr className="border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                                <tr className="border-b border-zinc-200 text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
                                   <th className="pb-1.5 font-bold">CUIT</th>
                                   <th className="pb-1.5 font-bold">Denominación</th>
                                   <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
@@ -2387,18 +2387,18 @@ export default function App() {
                               </thead>
                               <tbody>
                                 {visible.map((item, idx) => (
-                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[12px]">
-                                    <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
-                                    <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
-                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
+                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[13px]">
+                                    <td className="py-1.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
+                                    <td className="py-1.5 text-zinc-700 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
+                                    <td className="py-1.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
                                   </tr>
                                 ))}
                                 {rest.length > 0 && (
-                                  <tr className="border-t border-zinc-300 bg-zinc-100/60 text-[12px]">
-                                    <td className="py-2.5 font-mono text-zinc-500 font-semibold" colSpan={2}>
+                                  <tr className="border-t border-zinc-200 bg-zinc-50 text-[13px]">
+                                    <td className="py-1.5 font-mono text-zinc-700 font-semibold" colSpan={2}>
                                       Resto — {rest.length} empresa{rest.length !== 1 ? "s" : ""}
                                     </td>
-                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-600">{formatInThousands(restTotal)}</td>
+                                    <td className="py-1.5 text-right font-mono font-bold text-zinc-700">{formatInThousands(restTotal)}</td>
                                   </tr>
                                 )}
                               </tbody>
@@ -2561,17 +2561,38 @@ export default function App() {
                       (() => {
                         const subjects = activeGroup.subjects;
                         const hasCommonCounterparts = activeGroup.commonCounterparts.length > 0;
-
-                        // Alerta compacta: max 3 contrapartes principales + "N más"
                         const TOP_CP = 3;
-                        const mainCPs = activeGroup.commonCounterparts.slice(0, TOP_CP);
-                        const restCPs = activeGroup.commonCounterparts.slice(TOP_CP);
-                        const mainCPsText = mainCPs.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`).join(", ");
-                        const groupMatchReason = hasCommonCounterparts
-                          ? `Se observan convergencia de flujos entre los ${subjects.length} sujetos analizados, siendo ${mainCPs.length === 1 ? "la principal contraparte común" : "las principales contrapartes comunes"}: ${mainCPsText}${restCPs.length > 0 ? `, habiendo ${restCPs.length} contraparte${restCPs.length !== 1 ? "s" : ""} más detectada${restCPs.length !== 1 ? "s" : ""}.` : "."}`
-                          : `Se observan operaciones directas entre los ${subjects.length} sujetos analizados del grupo.`;
-                        
-                        // Lista completa para el desplegable
+
+                        // Calcular volumen y % por contraparte común como ORDENANTE (recibe fondos del sujeto = ordenaList)
+                        // y como RECEPTORA (envía fondos al sujeto = recibeList)
+                        const cpOrdenaMap = Object.fromEntries(ordenaList.map(x => [x.cuit, x]));
+                        const cpRecibeMap = Object.fromEntries(recibeList.map(x => [x.cuit, x]));
+
+                        const cpOrdenaTotal = activeGroup.commonCounterparts.reduce((s, c) => s + (cpOrdenaMap[c]?.sum || 0), 0);
+                        const cpRecibeTotal = activeGroup.commonCounterparts.reduce((s, c) => s + (cpRecibeMap[c]?.sum || 0), 0);
+
+                        const buildCPLine = (cuits: string[], volMap: Record<string, {sum: number; denom: string}>, total: number) => {
+                          const main = cuits.slice(0, TOP_CP);
+                          const rest = cuits.slice(TOP_CP);
+                          const mainTxt = main.map(c => {
+                            const name = cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte");
+                            const vol = volMap[c]?.sum || 0;
+                            const pct = total > 0 ? ((vol / total) * 100).toFixed(1) : "0.0";
+                            return `${name} (CUIT ${c}) ${pct}%`;
+                          }).join(", ");
+                          const restVol = rest.reduce((s, c) => s + (volMap[c]?.sum || 0), 0);
+                          const restPct = total > 0 ? ((restVol / total) * 100).toFixed(1) : "0.0";
+                          const restTxt = rest.length > 0 ? `; el resto (${rest.length} empresa${rest.length !== 1 ? "s" : ""}) representa el ${restPct}%` : "";
+                          return mainTxt + restTxt;
+                        };
+
+                        const ordenaLine = hasCommonCounterparts && cpOrdenaTotal > 0
+                          ? buildCPLine(activeGroup.commonCounterparts, cpOrdenaMap, ordenaTotal)
+                          : null;
+                        const recibeLine = hasCommonCounterparts && cpRecibeTotal > 0
+                          ? buildCPLine(activeGroup.commonCounterparts, cpRecibeMap, recibeTotal)
+                          : null;
+
                         const allCPsFull = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
 
                         return (
@@ -2624,16 +2645,25 @@ export default function App() {
                               <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
                                 ALERTA GRUPAL DETECTADA
                               </span>
-                              <div className="p-3 bg-red-950/20 rounded border border-red-900/60 text-[11px] text-red-200 font-sans shadow-sm leading-relaxed">
+                              <div className="p-3 bg-red-950/20 rounded border border-red-900/60 text-[12px] text-red-200 font-sans shadow-sm leading-snug">
                                 <div className="flex gap-2 items-start">
                                   <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                                  <div className="flex-1">
-                                    <strong className="text-red-300 block mb-1 uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
-                                    <span>{groupMatchReason}</span>
+                                  <div className="flex-1 space-y-1.5">
+                                    <strong className="text-red-300 block uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
+                                    <p>Se observan convergencia de flujos entre los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>.</p>
+                                    {ordenaLine && (
+                                      <p><span className="text-red-300 font-bold">Como ordenantes comunes:</span> {ordenaLine}.</p>
+                                    )}
+                                    {recibeLine && (
+                                      <p><span className="text-red-300 font-bold">Como receptoras comunes:</span> {recibeLine}.</p>
+                                    )}
+                                    {!hasCommonCounterparts && (
+                                      <p>Presentan operaciones directas entre sí.</p>
+                                    )}
                                     {allCPsFull.length > TOP_CP && (
-                                      <details className="mt-2">
+                                      <details className="mt-1">
                                         <summary className="cursor-pointer text-[10px] text-red-400 font-bold select-none hover:text-red-300">
-                                          Ver todas las contrapartes ({allCPsFull.length})
+                                          Ver todas las contrapartes comunes ({allCPsFull.length})
                                         </summary>
                                         <ul className="mt-1.5 space-y-0.5 text-[10px] text-red-300 list-disc list-inside">
                                           {allCPsFull.map((cp, i) => <li key={i}>{cp}</li>)}
