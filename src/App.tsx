@@ -2262,7 +2262,9 @@ export default function App() {
                         <>CUIT: <span className="text-zinc-950 font-black font-mono">{currentCuit || "NO SELECCIONADO"}</span> &emsp; <span className="text-zinc-900 font-extrabold">{currentSubjectName}</span></>
                       ) : (
                         <>
-                          GRUPO: <span className="text-zinc-950 font-extrabold text-zinc-900">{activeGroup ? joinSpanish(activeGroup.subjects.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Sujeto")} (CUIT ${c})`)) : ""}</span>
+                          GRUPO: <span className="text-zinc-950 font-extrabold text-zinc-900">
+                            {activeGroup ? `Red global de ${activeGroup.subjects.length} empresa${activeGroup.subjects.length !== 1 ? "s" : ""} interconectadas` : ""}
+                          </span>
                         </>
                       )}
                     </p>
@@ -2303,30 +2305,42 @@ export default function App() {
                         <div className="text-center py-10 text-zinc-400 text-xs font-normal">
                           No se registraron fondos recibidos por este CUIT analizado.
                         </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
-                                <th className="pb-1.5 font-bold">CUIT</th>
-                                <th className="pb-1.5 font-bold">Denominación</th>
-                                <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {recibeList.map((item, idx) => (
-                                <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
-                                  <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
-                                  <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
-                                  <td className="py-2.5 text-right font-mono font-bold text-zinc-900">
-                                    {formatInThousands(item.sum)}
-                                  </td>
+                      ) : (() => {
+                        const LIMIT = 10;
+                        const visible = recibeList.slice(0, LIMIT);
+                        const rest = recibeList.slice(LIMIT);
+                        const restTotal = rest.reduce((a, b) => a + b.sum, 0);
+                        return (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                  <th className="pb-1.5 font-bold">CUIT</th>
+                                  <th className="pb-1.5 font-bold">Denominación</th>
+                                  <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
+                              </thead>
+                              <tbody>
+                                {visible.map((item, idx) => (
+                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
+                                    <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
+                                    <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
+                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
+                                  </tr>
+                                ))}
+                                {rest.length > 0 && (
+                                  <tr className="border-t border-zinc-200 bg-zinc-50 text-[11px]">
+                                    <td className="py-2 font-mono text-zinc-400 italic" colSpan={2}>
+                                      + {rest.length} empresa{rest.length !== 1 ? "s" : ""} más
+                                    </td>
+                                    <td className="py-2 text-right font-mono font-bold text-zinc-500">{formatInThousands(restTotal)}</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {recibeList.length > 0 && (
@@ -2355,30 +2369,42 @@ export default function App() {
                         <div className="text-center py-10 text-zinc-400 text-xs font-normal">
                           No se registraron fondos ordenados por este CUIT analizado.
                         </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
-                                <th className="pb-1.5 font-bold">CUIT</th>
-                                <th className="pb-1.5 font-bold">Denominación</th>
-                                <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {ordenaList.map((item, idx) => (
-                                <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
-                                  <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
-                                  <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
-                                  <td className="py-2.5 text-right font-mono font-bold text-zinc-900">
-                                    {formatInThousands(item.sum)}
-                                  </td>
+                      ) : (() => {
+                        const LIMIT = 10;
+                        const visible = ordenaList.slice(0, LIMIT);
+                        const rest = ordenaList.slice(LIMIT);
+                        const restTotal = rest.reduce((a, b) => a + b.sum, 0);
+                        return (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                  <th className="pb-1.5 font-bold">CUIT</th>
+                                  <th className="pb-1.5 font-bold">Denominación</th>
+                                  <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
+                              </thead>
+                              <tbody>
+                                {visible.map((item, idx) => (
+                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
+                                    <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
+                                    <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
+                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
+                                  </tr>
+                                ))}
+                                {rest.length > 0 && (
+                                  <tr className="border-t border-zinc-200 bg-zinc-50 text-[11px]">
+                                    <td className="py-2 font-mono text-zinc-400 italic" colSpan={2}>
+                                      + {rest.length} empresa{rest.length !== 1 ? "s" : ""} más
+                                    </td>
+                                    <td className="py-2 text-right font-mono font-bold text-zinc-500">{formatInThousands(restTotal)}</td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {ordenaList.length > 0 && (
@@ -2393,55 +2419,7 @@ export default function App() {
 
                 </div>
 
-                {/* Movimientos Internos Table - Rendered Full Width inside Grupal mode below the column split */}
-                {forensicMode === "grupal" && activeGroup && internasList.length > 0 && (
-                  <div className="border border-zinc-200 rounded-xl p-4 bg-zinc-50/55 mt-6">
-                    <div className="border-b border-zinc-200 pb-2 mb-3.5 flex justify-between items-center bg-zinc-100/80 -mx-4 -mt-4 p-3 rounded-t-xl border-t border-x">
-                      <span className="font-extrabold text-xs text-zinc-900 uppercase tracking-wider block">
-                        Movimientos Internos de la Red (Traspasos Circulares)
-                      </span>
-                      <span className="bg-zinc-200 text-zinc-800 text-[9px] uppercase font-black px-2 py-0.5 rounded-full">
-                        FONDOS AUTO-COMPENSADOS EN RED
-                      </span>
-                    </div>
 
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
-                            <th className="pb-1.5 font-bold">CUIT Origen</th>
-                            <th className="pb-1.5 font-bold">Denominación Origen</th>
-                            <th className="pb-1.5 font-bold text-center">➔</th>
-                            <th className="pb-1.5 font-bold">CUIT Destino</th>
-                            <th className="pb-1.5 font-bold">Denominación Destino</th>
-                            <th className="pb-1.5 font-bold text-right">Volumen Canalizado</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {internasList.map((item, idx) => (
-                            <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px] last:border-0">
-                              <td className="py-2.5 font-mono text-zinc-900 font-bold">{item.senderCuit}</td>
-                              <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[220px]" title={item.senderDenom}>{item.senderDenom}</td>
-                              <td className="py-2.5 text-center text-zinc-400 font-black">➔</td>
-                              <td className="py-2.5 font-mono text-zinc-900 font-bold">{item.receiverCuit}</td>
-                              <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[220px]" title={item.receiverDenom}>{item.receiverDenom}</td>
-                              <td className="py-2.5 text-right font-mono font-bold text-zinc-900">
-                                {formatInThousands(item.sum)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="border-t border-zinc-200 pt-3 mt-4 flex justify-between items-center font-bold text-xs text-zinc-900">
-                      <span>VOLUMEN TOTAL TRANSFERIDO</span>
-                      <span className="font-mono text-xs text-zinc-700 font-extrabold bg-zinc-150 px-2.5 py-1 rounded border border-zinc-250">
-                        {formatInThousands(internasTotal)}
-                      </span>
-                    </div>
-                  </div>
-                )}
               </div>
 
             {/* Individual Inspection Panel (Right Sidebar - Positioned adjacent to graph on desktop) */}

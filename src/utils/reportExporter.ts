@@ -1117,7 +1117,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       } else {
         // Grupal Mode Consolidado
         const groupInfo = reportState.groupNetwork;
-        titleDetailStr = "CONSECIONARIO GRUPAL INTERCONECTADO REF #" + groupInfo.groupId;
+        titleDetailStr = "RED GLOBAL DE " + groupInfo.subjects.length + " EMPRESA" + (groupInfo.subjects.length !== 1 ? "S" : "") + " INTERCONECTADAS — Ref #" + groupInfo.groupId;
         
         const subSet = new Set(groupInfo.subjects);
         const cpSet = new Set(groupInfo.commonCounterparts);
@@ -1301,7 +1301,11 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         tbody.innerHTML = '<tr><td colspan="3" class="py-10 text-center text-zinc-500 font-sans italic text-xs">Sin registros para el nodo analizado.</td></tr>';
         return;
       }
-      list.forEach((item, idx) => {
+      const LIMIT = 10;
+      const visible = list.slice(0, LIMIT);
+      const rest = list.slice(LIMIT);
+      const restTotal = rest.reduce((acc, item) => acc + item.sum, 0);
+      visible.forEach((item, idx) => {
         const tr = document.createElement("tr");
         tr.className = "border-b border-zinc-800/80 hover:bg-zinc-900/40 text-[11.5px] text-zinc-300 transition-colors";
         tr.innerHTML = \`
@@ -1313,6 +1317,15 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
 \`;
         tbody.appendChild(tr);
       });
+      if (rest.length > 0) {
+        const tr = document.createElement("tr");
+        tr.className = "border-t border-zinc-700 text-[11px] text-zinc-500";
+        tr.innerHTML = \`
+          <td class="py-2 font-mono italic" colspan="2">+ \${rest.length} empresa\${rest.length !== 1 ? "s" : ""} más</td>
+          <td class="py-2 text-right font-mono font-bold">\${formatInThousands(restTotal)}</td>
+\`;
+        tbody.appendChild(tr);
+      }
     }
 
     // Estado de Zoom/Pan/Drag del grafo (réplica fiel del comportamiento de la app en vivo)
