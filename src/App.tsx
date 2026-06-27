@@ -2244,6 +2244,7 @@ export default function App() {
                     cuitDenominacionesMap={cuitDenominacionesMap}
                     currentCuit={currentCuit}
                     commonCounterparts={activeGroup?.commonCounterparts || []}
+                    isGroupMode={forensicMode === "grupal"}
                   />
                 </div>
               )}
@@ -2314,7 +2315,7 @@ export default function App() {
                           <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
                               <thead>
-                                <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                <tr className="border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                                   <th className="pb-1.5 font-bold">CUIT</th>
                                   <th className="pb-1.5 font-bold">Denominación</th>
                                   <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
@@ -2322,18 +2323,18 @@ export default function App() {
                               </thead>
                               <tbody>
                                 {visible.map((item, idx) => (
-                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
+                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[12px]">
                                     <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
                                     <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
                                     <td className="py-2.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
                                   </tr>
                                 ))}
                                 {rest.length > 0 && (
-                                  <tr className="border-t border-zinc-200 bg-zinc-50 text-[11px]">
-                                    <td className="py-2 font-mono text-zinc-400 italic" colSpan={2}>
-                                      + {rest.length} empresa{rest.length !== 1 ? "s" : ""} más
+                                  <tr className="border-t border-zinc-300 bg-zinc-100/60 text-[12px]">
+                                    <td className="py-2.5 font-mono text-zinc-500 font-semibold" colSpan={2}>
+                                      Resto — {rest.length} empresa{rest.length !== 1 ? "s" : ""}
                                     </td>
-                                    <td className="py-2 text-right font-mono font-bold text-zinc-500">{formatInThousands(restTotal)}</td>
+                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-600">{formatInThousands(restTotal)}</td>
                                   </tr>
                                 )}
                               </tbody>
@@ -2378,7 +2379,7 @@ export default function App() {
                           <div className="overflow-x-auto">
                             <table className="w-full text-left text-xs border-collapse">
                               <thead>
-                                <tr className="border-b border-zinc-200 text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                <tr className="border-b border-zinc-200 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
                                   <th className="pb-1.5 font-bold">CUIT</th>
                                   <th className="pb-1.5 font-bold">Denominación</th>
                                   <th className="pb-1.5 font-bold text-right">Monto Acumulado</th>
@@ -2386,18 +2387,18 @@ export default function App() {
                               </thead>
                               <tbody>
                                 {visible.map((item, idx) => (
-                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[11px]">
+                                  <tr key={idx} className="border-b border-zinc-100 hover:bg-zinc-100/50 text-[12px]">
                                     <td className="py-2.5 font-mono text-zinc-900 font-semibold">{item.cuit}</td>
                                     <td className="py-2.5 text-zinc-650 truncate max-w-[150px] sm:max-w-[240px] md:max-w-[340px]" title={item.denom}>{item.denom}</td>
                                     <td className="py-2.5 text-right font-mono font-bold text-zinc-900">{formatInThousands(item.sum)}</td>
                                   </tr>
                                 ))}
                                 {rest.length > 0 && (
-                                  <tr className="border-t border-zinc-200 bg-zinc-50 text-[11px]">
-                                    <td className="py-2 font-mono text-zinc-400 italic" colSpan={2}>
-                                      + {rest.length} empresa{rest.length !== 1 ? "s" : ""} más
+                                  <tr className="border-t border-zinc-300 bg-zinc-100/60 text-[12px]">
+                                    <td className="py-2.5 font-mono text-zinc-500 font-semibold" colSpan={2}>
+                                      Resto — {rest.length} empresa{rest.length !== 1 ? "s" : ""}
                                     </td>
-                                    <td className="py-2 text-right font-mono font-bold text-zinc-500">{formatInThousands(restTotal)}</td>
+                                    <td className="py-2.5 text-right font-mono font-bold text-zinc-600">{formatInThousands(restTotal)}</td>
                                   </tr>
                                 )}
                               </tbody>
@@ -2559,25 +2560,19 @@ export default function App() {
                     activeGroup ? (
                       (() => {
                         const subjects = activeGroup.subjects;
-                        
-                        const subjectsList = subjects.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Sujeto")} (CUIT ${c})`);
-                        const subjectsDetail = joinSpanish(subjectsList);
-                        
                         const hasCommonCounterparts = activeGroup.commonCounterparts.length > 0;
-                        let presentationText = "";
-                        if (hasCommonCounterparts) {
-                          const counterpartsList = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
-                          const counterpartsDetail = joinSpanish(counterpartsList);
-                          if (activeGroup.commonCounterparts.length === 1) {
-                            presentationText = `presentando en común la siguiente contraparte: ${counterpartsDetail}`;
-                          } else {
-                            presentationText = `presentando en común las siguientes contrapartes: ${counterpartsDetail}`;
-                          }
-                        } else {
-                          presentationText = `presentando operaciones entre sí`;
-                        }
 
-                        const groupMatchReason = `Se observan convergencia de flujos entre los sujetos analizados: ${subjectsDetail}, ${presentationText}.`;
+                        // Alerta compacta: max 3 contrapartes principales + "N más"
+                        const TOP_CP = 3;
+                        const mainCPs = activeGroup.commonCounterparts.slice(0, TOP_CP);
+                        const restCPs = activeGroup.commonCounterparts.slice(TOP_CP);
+                        const mainCPsText = mainCPs.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`).join(", ");
+                        const groupMatchReason = hasCommonCounterparts
+                          ? `Se observan convergencia de flujos entre los ${subjects.length} sujetos analizados, siendo ${mainCPs.length === 1 ? "la principal contraparte común" : "las principales contrapartes comunes"}: ${mainCPsText}${restCPs.length > 0 ? `, habiendo ${restCPs.length} contraparte${restCPs.length !== 1 ? "s" : ""} más detectada${restCPs.length !== 1 ? "s" : ""}.` : "."}`
+                          : `Se observan operaciones directas entre los ${subjects.length} sujetos analizados del grupo.`;
+                        
+                        // Lista completa para el desplegable
+                        const allCPsFull = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
 
                         return (
                           <div className="flex flex-col gap-4">
@@ -2629,12 +2624,22 @@ export default function App() {
                               <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
                                 ALERTA GRUPAL DETECTADA
                               </span>
-                              <div className="p-3 bg-red-950/20 rounded border border-red-900/60 text-xs text-red-200 font-sans shadow-sm leading-relaxed">
+                              <div className="p-3 bg-red-950/20 rounded border border-red-900/60 text-[11px] text-red-200 font-sans shadow-sm leading-relaxed">
                                 <div className="flex gap-2 items-start">
                                   <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                                  <div>
+                                  <div className="flex-1">
                                     <strong className="text-red-300 block mb-1 uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
-                                    {groupMatchReason}
+                                    <span>{groupMatchReason}</span>
+                                    {allCPsFull.length > TOP_CP && (
+                                      <details className="mt-2">
+                                        <summary className="cursor-pointer text-[10px] text-red-400 font-bold select-none hover:text-red-300">
+                                          Ver todas las contrapartes ({allCPsFull.length})
+                                        </summary>
+                                        <ul className="mt-1.5 space-y-0.5 text-[10px] text-red-300 list-disc list-inside">
+                                          {allCPsFull.map((cp, i) => <li key={i}>{cp}</li>)}
+                                        </ul>
+                                      </details>
+                                    )}
                                   </div>
                                 </div>
                               </div>

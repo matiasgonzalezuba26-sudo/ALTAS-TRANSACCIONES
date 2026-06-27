@@ -10,6 +10,7 @@ interface NetworkGraphProps {
   cuitDenominacionesMap?: Record<string, string>;
   currentCuit: string | null;
   commonCounterparts?: string[];
+  isGroupMode?: boolean;
 }
 
 interface GroupNode {
@@ -52,7 +53,7 @@ function formatK(n: number): string {
 
 export default function NetworkGraph({
   nodes, edges, selectedNodeId, onSelectNode,
-  cuitDenominacionesMap, currentCuit, commonCounterparts = []
+  cuitDenominacionesMap, currentCuit, commonCounterparts = [], isGroupMode = false
 }: NetworkGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 520 });
@@ -253,21 +254,38 @@ export default function NetworkGraph({
   }, [renderNodes, draggedPositions, groupNodes]);
 
   const getNodeColor = (node: AMLNode, isCommon: boolean) => {
-    // Contraparte común siempre azul, tiene prioridad sobre el tipo
-    if (isCommon) return { fill: "#dbeafe", stroke: "#3b82f6" };
     // Sujetos analizados siempre rosa/rojo
     if (node.type === "ANALIZADO") {
       if (node.risk_level === "MEDIO") return { fill: "#fee2e2", stroke: "#f59e0b" };
       return { fill: "#fee2e2", stroke: "#ef4444" };
     }
-    // Nodos grupo sintéticos: usar groupCategory para determinar color
+    // Nodos grupo sintéticos
     if ((node as any).isGroupNode) {
+      if (isGroupMode) return { fill: "#dbeafe", stroke: "#3b82f6" };
       const cat = (node as any).groupCategory;
       if (cat === "ENVIA") return { fill: "#d1fae5", stroke: "#22c55e" };
       if (cat === "RECIBE") return { fill: "#ffedd5", stroke: "#f97316" };
       if (cat === "AMBOS") return { fill: "#fef9c3", stroke: "#ea580c" };
       return { fill: "#f1f5f9", stroke: "#94a3b8" };
     }
+    // En modo grupal: contrapartes son azul por defecto (comunes a la red)
+    // Solo se usa verde/naranja si opera EXCLUSIVAMENTE con UN solo sujeto analizado
+    if (isGroupMode) {
+      const analyzedIds = new Set(nodes.filter(n => n.type === "ANALIZADO").map(n => n.id));
+      const connectedAnalyzed = new Set([
+        ...edges.filter(e => e.target === node.id && analyzedIds.has(e.source)).map(e => e.source),
+        ...edges.filter(e => e.source === node.id && analyzedIds.has(e.target)).map(e => e.target),
+      ]);
+      if (connectedAnalyzed.size !== 1) return { fill: "#dbeafe", stroke: "#3b82f6" };
+      // Exclusiva de 1 sujeto: usar color por dirección
+      const sends = edges.some(e => e.source === node.id && analyzedIds.has(e.target));
+      const receives = edges.some(e => e.target === node.id && analyzedIds.has(e.source));
+      if (sends && receives) return { fill: "#fef9c3", stroke: "#ea580c" };
+      if (sends) return { fill: "#d1fae5", stroke: "#22c55e" };
+      return { fill: "#ffedd5", stroke: "#f97316" };
+    }
+    // Modo individual: color por dirección
+    if (isCommon) return { fill: "#dbeafe", stroke: "#3b82f6" };
     const sends = edges.some(e => e.source === node.id);
     const receives = edges.some(e => e.target === node.id);
     if (sends && receives) return { fill: "#fef9c3", stroke: "#ea580c" };
