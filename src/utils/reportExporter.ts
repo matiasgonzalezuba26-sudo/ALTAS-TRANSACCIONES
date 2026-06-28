@@ -1,5 +1,52 @@
 import { Transaction, AMLNode, AMLEdge } from "../types";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Tipos de flujo pre-computados que la app pasa directamente al exportador.
+// El reporte no recalcula nada: solo serializa y renderiza lo que la app tiene.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface FlowEntry {
+  cuit: string;
+  denom: string;
+  sum: number;
+}
+
+export interface InternalFlowEntry {
+  senderCuit: string;
+  senderDenom: string;
+  receiverCuit: string;
+  receiverDenom: string;
+  sum: number;
+}
+
+/** Snapshot completo del estado de la pestaña "Flujo Individual" para un CUIT dado */
+export interface IndividualSnapshot {
+  cuit: string;
+  denominacion: string;
+  altaDate: string;
+  antiquityDays: number;
+  totalRecibido: number;
+  totalOrdenado: number;
+  receives: FlowEntry[];       // contrapartes que ENVÍAN fondos al sujeto
+  sends: FlowEntry[];          // contrapartes que RECIBEN fondos del sujeto
+  graphNodes: AMLNode[];       // nodos ya filtrados para este CUIT
+  graphEdges: AMLEdge[];       // edges ya filtrados para este CUIT
+}
+
+/** Snapshot completo del estado de la pestaña "Flujo Grupal" para un grupo dado */
+export interface GroupSnapshot {
+  groupId: string;
+  subjects: string[];
+  commonCounterparts: string[];
+  totalIntergroupVolume: number;
+  detectedLoopsCount: number;
+  receives: FlowEntry[];           // inyecciones externas al grupo
+  sends: FlowEntry[];              // liquidaciones externas del grupo
+  internals: InternalFlowEntry[];  // movimientos entre integrantes
+  graphNodes: AMLNode[];           // nodos ya filtrados para el grupo
+  graphEdges: AMLEdge[];           // edges ya filtrados para el grupo
+}
+
 export interface CapturedAMLState {
   reportDate: string;
   complianceOfficer: string;
@@ -13,8 +60,8 @@ export interface CapturedAMLState {
   forensicMode?: "individual" | "grupal";
   currentCuit?: string;
   selectedGroupId?: string | null;
-  
-  // Captura de Métricas Clave (EBR - Enfoque Basado en Riesgo)
+
+  // Métricas agregadas (Pestaña 1)
   metrics: {
     totalVolumeARS: number;
     totalTransactionsCount: number;
@@ -22,7 +69,6 @@ export interface CapturedAMLState {
     flaggedHighRiskCount: number;
   };
 
-  // Sujetos Bajo Análisis e Investigados
   flaggedSubjects: Array<{
     cuit: string;
     denominacion: string;
@@ -34,39 +80,37 @@ export interface CapturedAMLState {
     reasons: string[];
   }>;
 
-  // Detalle de Transacciones Críticas Detectadas
   criticalTransactions: Transaction[];
 
-  // Red de Relaciones Identificada (Evaluación Grupal)
-  groupNetwork?: {
-    groupId: string;
-    subjects: string[];
-    commonCounterparts: string[];
-    totalIntergroupVolume: number;
-    detectedLoopsCount: number;
-  } | null;
-
-  // Datos para renderizado interactivo en la pestaña 2 de red forense
+  // Mapa de denominaciones para lookups en el reporte
   cuitDenominacionesMap: Record<string, string>;
+
+  // Transacciones completas (necesarias para la pestaña 1 y búsquedas)
   allTransactions: Transaction[];
   positiveCases: Array<{
-    id: string; // CUIT
+    id: string;
     altaDate: string;
     antiquity_days: number;
   }>;
 
-  // Grafo completo calculado por el motor AML (mismos datos que usa la app en vivo
-  // para el panel "Análisis de Flujos"), necesario para que el reporte exportado
-  // tenga exactamente la misma información que la app, incluyendo relaciones de
-  // segundo nivel entre contrapartes (ej: contraparte común -> su propia contraparte).
+  // ── NUEVO: snapshots pre-computados por la app ────────────────────────────
+  // El reporte HTML usa estos directamente; no recalcula nada.
+  individualSnapshots: IndividualSnapshot[];  // uno por cada CUIT en flaggedSubjects
+  groupSnapshot: GroupSnapshot | null;         // el grupo activo al momento de exportar
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Grafo completo (para búsquedas adicionales desde la pestaña 2 si se necesita)
   graphNodes: AMLNode[];
   graphEdges: AMLEdge[];
 }
 
 /**
  * Paso 1: Captura de Estado de Interfaz y Datos Dinámicos
- * Función encargada de compilar la instantánea del estado regulatorio actual del dashboard,
- * garantizando la trazabilidad de auditoría AML requerida por la normativa vigente (GAFI Rec. 1).
+ *
+ * Ahora la función acepta los datos ya calculados por la app
+ * (graphData filtrado por CUIT/grupo, tablas de flujo, etc.) y los serializa
+ * tal cual. El reporte HTML no recalcula: refleja el estado exacto de la app
+ * en el momento de exportar, independientemente de futuros cambios en la lógica.
  */
 export function captureCurrentAMLState(params: {
   analysisMonth: string;
@@ -76,7 +120,7 @@ export function captureCurrentAMLState(params: {
   selectedPresetName: string;
   transactions: Transaction[];
   positiveCases: Array<{
-    id: string; // CUIT
+    id: string;
     altaDate: string;
     antiquity_days: number;
   }>;
@@ -93,40 +137,27 @@ export function captureCurrentAMLState(params: {
   selectedGroupId?: string | null;
   graphNodes?: AMLNode[];
   graphEdges?: AMLEdge[];
+  // ── NUEVO: datos pre-computados desde la app ──────────────────────────────
+  individualSnapshots?: IndividualSnapshot[];
+  groupSnapshot?: GroupSnapshot | null;
+  // ─────────────────────────────────────────────────────────────────────────
 }): CapturedAMLState {
   const {
-    analysisMonth,
-    lookbackMonths,
-    threshold,
-    selectedPresetId,
-    selectedPresetName,
-    transactions,
-    positiveCases,
-    cuitDenominacionesMap,
-    activeGroup,
-    antiquityLimit,
-    activeTab,
-    forensicMode,
-    currentCuit,
-    selectedGroupId,
-    graphNodes,
-    graphEdges,
+    analysisMonth, lookbackMonths, threshold, selectedPresetId, selectedPresetName,
+    transactions, positiveCases, cuitDenominacionesMap, activeGroup, antiquityLimit,
+    activeTab, forensicMode, currentCuit, selectedGroupId, graphNodes, graphEdges,
+    individualSnapshots, groupSnapshot,
   } = params;
 
-  // Calcular métricas agregadas
   const totalVolume = transactions.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
   const uniqueCuits = new Set(transactions.map(t => t.CUIT));
 
-  // Compilar sujetos alertados
   const flaggedSubjects = positiveCases.map(node => {
     const subjectTxs = transactions.filter(t => t.CUIT === node.id);
     const subjectVolume = subjectTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
     const antiquity = node.antiquity_days;
-    
-    // Categorización basada en Enfoque de Riesgo de lavado esctructurado
     let riskCategory: "ALTO" | "MEDIO" | "BAJO" = "BAJO";
     const reasons: string[] = [];
-
     if (antiquity <= 365) {
       reasons.push(`Inscripción Reciente (Antigüedad de ${antiquity} días)`);
       if (subjectVolume > threshold) {
@@ -136,7 +167,6 @@ export function captureCurrentAMLState(params: {
         riskCategory = "MEDIO";
       }
     }
-
     return {
       cuit: node.id,
       denominacion: cuitDenominacionesMap[node.id] || `Sujeto Fiscal ${node.id}`,
@@ -149,40 +179,107 @@ export function captureCurrentAMLState(params: {
     };
   });
 
-  // Filtrar transacciones críticas asociadas a conductas inusuales flaggeadas
   const criticalCuitSet = new Set(positiveCases.map(c => c.id));
   const criticalTransactions = transactions.filter(
     t => criticalCuitSet.has(t.CUIT) || parseFloat(t.MONTO) > threshold / 5
   );
 
-  // Red de Relaciones Identificada (Estructura Grupal)
-  let groupNetwork = null;
-  if (activeGroup) {
-    const groupTxs = transactions.filter(t => activeGroup.subjects.includes(t.CUIT));
+  // Si la app no pasó snapshots pre-computados, los generamos aquí como fallback
+  // (comportamiento retrocompatible: el reporte siempre funciona aunque App.tsx
+  // no haya sido actualizado todavía para pasar los nuevos parámetros)
+  const resolvedIndividualSnapshots: IndividualSnapshot[] = individualSnapshots && individualSnapshots.length > 0
+    ? individualSnapshots
+    : positiveCases.map(node => {
+        const subjectTxs = transactions.filter(t => t.CUIT === node.id);
+        const totalRecibido = subjectTxs.filter(t => t.TIPO === "RECIBIDA").reduce((s, t) => s + parseFloat(t.MONTO || "0"), 0);
+        const totalOrdenado = subjectTxs.filter(t => t.TIPO === "ORDENADA").reduce((s, t) => s + parseFloat(t.MONTO || "0"), 0);
+
+        const recMap: Record<string, number> = {};
+        subjectTxs.filter(t => t.TIPO === "RECIBIDA").forEach(t => {
+          recMap[t.CUIT_CONTRAPARTE] = (recMap[t.CUIT_CONTRAPARTE] || 0) + parseFloat(t.MONTO || "0");
+        });
+        const sndMap: Record<string, number> = {};
+        subjectTxs.filter(t => t.TIPO === "ORDENADA").forEach(t => {
+          sndMap[t.CUIT_CONTRAPARTE] = (sndMap[t.CUIT_CONTRAPARTE] || 0) + parseFloat(t.MONTO || "0");
+        });
+
+        // Filtrar grafo completo para este CUIT
+        const iEdges = (graphEdges || []).filter(e => e.source === node.id || e.target === node.id);
+        const iIds = new Set<string>([node.id]);
+        iEdges.forEach(e => { iIds.add(e.source); iIds.add(e.target); });
+        const iNodes = (graphNodes || []).filter(n => iIds.has(n.id));
+
+        return {
+          cuit: node.id,
+          denominacion: cuitDenominacionesMap[node.id] || `Sujeto Fiscal ${node.id}`,
+          altaDate: node.altaDate,
+          antiquityDays: node.antiquity_days,
+          totalRecibido,
+          totalOrdenado,
+          receives: Object.keys(recMap).map(k => ({ cuit: k, denom: cuitDenominacionesMap[k] || k, sum: recMap[k] })).sort((a, b) => b.sum - a.sum),
+          sends: Object.keys(sndMap).map(k => ({ cuit: k, denom: cuitDenominacionesMap[k] || k, sum: sndMap[k] })).sort((a, b) => b.sum - a.sum),
+          graphNodes: iNodes,
+          graphEdges: iEdges,
+        };
+      });
+
+  let resolvedGroupSnapshot: GroupSnapshot | null = groupSnapshot !== undefined ? groupSnapshot : null;
+  if (!resolvedGroupSnapshot && activeGroup) {
+    const subSet = new Set(activeGroup.subjects);
+    const cpSet = new Set(activeGroup.commonCounterparts);
+    const groupTxs = transactions.filter(t => subSet.has(t.CUIT));
     const intergroupVolume = groupTxs.reduce((sum, t) => sum + parseFloat(t.MONTO || "0"), 0);
 
-    groupNetwork = {
+    const recMap: Record<string, number> = {};
+    groupTxs.filter(t => t.TIPO === "RECIBIDA" && !subSet.has(t.CUIT_CONTRAPARTE)).forEach(t => {
+      recMap[t.CUIT_CONTRAPARTE] = (recMap[t.CUIT_CONTRAPARTE] || 0) + parseFloat(t.MONTO || "0");
+    });
+    const sndMap: Record<string, number> = {};
+    groupTxs.filter(t => t.TIPO === "ORDENADA" && !subSet.has(t.CUIT_CONTRAPARTE)).forEach(t => {
+      sndMap[t.CUIT_CONTRAPARTE] = (sndMap[t.CUIT_CONTRAPARTE] || 0) + parseFloat(t.MONTO || "0");
+    });
+    const intMap: Record<string, number> = {};
+    groupTxs.forEach(t => {
+      const isSenderInGroup = subSet.has(t.CUIT) || cpSet.has(t.CUIT);
+      const isReceiverInGroup = subSet.has(t.CUIT_CONTRAPARTE) || cpSet.has(t.CUIT_CONTRAPARTE);
+      if (isSenderInGroup && isReceiverInGroup) {
+        const sender = t.TIPO === "RECIBIDA" ? t.CUIT_CONTRAPARTE : t.CUIT;
+        const receiver = t.TIPO === "RECIBIDA" ? t.CUIT : t.CUIT_CONTRAPARTE;
+        const key = sender + "➔" + receiver;
+        intMap[key] = (intMap[key] || 0) + parseFloat(t.MONTO || "0");
+      }
+    });
+
+    // Filtrar grafo para el grupo
+    const gEdges = (graphEdges || []).filter(e => subSet.has(e.source) || subSet.has(e.target));
+    const gIds = new Set<string>(activeGroup.subjects);
+    gEdges.forEach(e => { gIds.add(e.source); gIds.add(e.target); });
+    const gNodes = (graphNodes || []).filter(n => gIds.has(n.id));
+
+    resolvedGroupSnapshot = {
       groupId: activeGroup.id,
       subjects: activeGroup.subjects,
       commonCounterparts: activeGroup.commonCounterparts,
       totalIntergroupVolume: intergroupVolume,
       detectedLoopsCount: activeGroup.subjects.length > 2 ? 1 : 0,
+      receives: Object.keys(recMap).map(k => ({ cuit: k, denom: cuitDenominacionesMap[k] || k, sum: recMap[k] })).sort((a, b) => b.sum - a.sum),
+      sends: Object.keys(sndMap).map(k => ({ cuit: k, denom: cuitDenominacionesMap[k] || k, sum: sndMap[k] })).sort((a, b) => b.sum - a.sum),
+      internals: Object.keys(intMap).map(key => {
+        const [sk, rk] = key.split("➔");
+        return { senderCuit: sk, senderDenom: cuitDenominacionesMap[sk] || sk, receiverCuit: rk, receiverDenom: cuitDenominacionesMap[rk] || rk, sum: intMap[key] };
+      }).sort((a, b) => b.sum - a.sum),
+      graphNodes: gNodes,
+      graphEdges: gEdges,
     };
   }
 
   return {
     reportDate: new Date().toISOString(),
     complianceOfficer: "AUDITOR_PLD_ESTÁNDAR_CNBV",
-    analysisMonth,
-    lookbackMonths,
+    analysisMonth, lookbackMonths,
     alertThreshold: threshold,
-    selectedPresetId,
-    selectedPresetName,
-    antiquityLimit,
-    activeTab,
-    forensicMode,
-    currentCuit,
-    selectedGroupId,
+    selectedPresetId, selectedPresetName, antiquityLimit,
+    activeTab, forensicMode, currentCuit, selectedGroupId,
     metrics: {
       totalVolumeARS: totalVolume,
       totalTransactionsCount: transactions.length,
@@ -191,10 +288,11 @@ export function captureCurrentAMLState(params: {
     },
     flaggedSubjects,
     criticalTransactions,
-    groupNetwork,
     cuitDenominacionesMap,
     allTransactions: transactions,
     positiveCases,
+    individualSnapshots: resolvedIndividualSnapshots,
+    groupSnapshot: resolvedGroupSnapshot,
     graphNodes: graphNodes || [],
     graphEdges: graphEdges || [],
   };
@@ -641,36 +739,41 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
     
     // Variables de control de pestaña y filtros locales
     let localActiveTab = reportState.activeTab || 'alertas';
-    let localForensicMode = reportState.forensicMode || 'individual'; // 'individual' o 'grupal'
+    let localForensicMode = reportState.forensicMode || 'individual';
     let selectedCuit = reportState.currentCuit || '';
     let selectedGroupId = reportState.selectedGroupId || '';
 
+    // Helpers para acceder a los snapshots pre-computados por la app
+    function getIndividualSnapshot(cuit) {
+      const snaps = reportState.individualSnapshots || [];
+      return snaps.find(s => s.cuit === cuit) || null;
+    }
+    function getGroupSnapshot() {
+      return reportState.groupSnapshot || null;
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
-      // Inicializar selectores
       initLocalSelects();
 
-      // Configurar el primer sujeto por defecto
-      if (!selectedCuit && reportState.flaggedSubjects && reportState.flaggedSubjects.length > 0) {
-        selectedCuit = reportState.flaggedSubjects[0].cuit;
+      // Seleccionar CUIT inicial
+      if (!selectedCuit && reportState.individualSnapshots && reportState.individualSnapshots.length > 0) {
+        selectedCuit = reportState.individualSnapshots[0].cuit;
       } else if (selectedCuit) {
         const subjectSelect = document.getElementById("local-subject-select");
         if (subjectSelect) subjectSelect.value = selectedCuit;
       }
-      
-      // Configurar el grupo por defecto si existe
-      if (!selectedGroupId && reportState.groupNetwork) {
-        selectedGroupId = reportState.groupNetwork.groupId;
+
+      // Seleccionar grupo inicial
+      const gs = getGroupSnapshot();
+      if (!selectedGroupId && gs) {
+        selectedGroupId = gs.groupId;
       } else if (selectedGroupId) {
         const groupSelect = document.getElementById("local-group-select");
         if (groupSelect) groupSelect.value = selectedGroupId;
       }
 
-      // Sincronizar el estado de la pestaña inicial
       switchReportTab(localActiveTab);
-      // Sincronizar el modo forense inicial
       setLocalForensicMode(localForensicMode);
-
-      // Renderizar vista forense inicial
       updateForensicsView();
 
       // 1. Filtrado Interactivo de Sujetos Alertados (Pestaña 1)
@@ -865,22 +968,22 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
     function initLocalSelects() {
       const subjectSelect = document.getElementById("local-subject-select");
       subjectSelect.innerHTML = '';
-      
-      if (reportState.flaggedSubjects) {
-        reportState.flaggedSubjects.forEach((sub, i) => {
-          const opt = document.createElement("option");
-          opt.value = sub.cuit;
-          opt.text = "ID: " + (i+1) + " | CUIT: " + sub.cuit + " | " + sub.denominacion;
-          subjectSelect.appendChild(opt);
-        });
-      }
+
+      const snaps = reportState.individualSnapshots || [];
+      snaps.forEach((snap, i) => {
+        const opt = document.createElement("option");
+        opt.value = snap.cuit;
+        opt.text = "ID: " + (i+1) + " | CUIT: " + snap.cuit + " | " + snap.denominacion;
+        subjectSelect.appendChild(opt);
+      });
 
       const groupSelect = document.getElementById("local-group-select");
       groupSelect.innerHTML = '';
-      if (reportState.groupNetwork) {
+      const gs = getGroupSnapshot();
+      if (gs) {
         const opt = document.createElement("option");
-        opt.value = reportState.groupNetwork.groupId;
-        opt.text = "Grupo Ref #" + reportState.groupNetwork.groupId;
+        opt.value = gs.groupId;
+        opt.text = "Grupo Ref #" + gs.groupId;
         groupSelect.appendChild(opt);
       } else {
         const opt = document.createElement("option");
@@ -987,72 +1090,41 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       selectedCuit = subjectSelect.value;
       selectedGroupId = groupSelect.value;
 
-      const txs = reportState.allTransactions || [];
       const denoms = reportState.cuitDenominacionesMap || {};
-
       let receives = [];
       let sends = [];
-      let internals = [];
-      
       let titleDetailStr = '';
-      const isGrupal = (localForensicMode === 'grupal' && reportState.groupNetwork);
+      const gs = getGroupSnapshot();
+      const isGrupal = (localForensicMode === 'grupal' && gs);
 
-      // 1. Calcular Datos del Flujo Transaccional
+      // ── Lee directo del snapshot pre-computado — no recalcula nada ──────────
       if (!isGrupal) {
-        // Individual Mode
-        titleDetailStr = "CUIT: " + selectedCuit + " | " + (denoms[selectedCuit] || "Sujeto Analizado");
-        
-        // Conseguir transacciones de este CUIT
-        const subjectTxs = txs.filter(t => t.CUIT === selectedCuit);
-        
-        // Consolidar RECIBE (Orígenes) - Dinero enviado de contrapartes hacia este CUIT
-        const recMap = {};
-        subjectTxs.filter(t => t.TIPO === 'RECIBIDA').forEach(t => {
-          const key = t.CUIT_CONTRAPARTE;
-          recMap[key] = (recMap[key] || 0) + parseFloat(t.MONTO);
-        });
-        receives = Object.keys(recMap).map(k => ({
-          cuit: k,
-          denom: denoms[k] || k,
-          sum: recMap[k]
-        })).sort((a,b) => b.sum - a.sum);
+        // MODO INDIVIDUAL: datos ya calculados por la app al momento de exportar
+        const snap = getIndividualSnapshot(selectedCuit);
+        if (!snap) {
+          document.getElementById("forensic-sidebar-content").innerHTML =
+            '<p class="text-zinc-500 text-xs p-4">Sin datos para el CUIT seleccionado.</p>';
+          renderLocalTable("forensic-recibe-tbody", []);
+          renderLocalTable("forensic-ordena-tbody", []);
+          renderLocalSVGFromSnapshot([], [], false);
+          return;
+        }
 
-        // Consolidar ORDENA (Destinos) - Dinero enviado de este CUIT hacia contrapartes
-        const sndMap = {};
-        subjectTxs.filter(t => t.TIPO === 'ORDENADA').forEach(t => {
-          const key = t.CUIT_CONTRAPARTE;
-          sndMap[key] = (sndMap[key] || 0) + parseFloat(t.MONTO);
-        });
-        sends = Object.keys(sndMap).map(k => ({
-          cuit: k,
-          denom: denoms[k] || k,
-          sum: sndMap[k]
-        })).sort((a,b) => b.sum - a.sum);
+        receives = snap.receives || [];
+        sends = snap.sends || [];
+        titleDetailStr = "CUIT: " + snap.cuit + " | " + snap.denominacion;
 
-        // Ocultar sección interna
         document.getElementById("grupal-warning-banner").classList.add("hidden");
         document.getElementById("label-origenes-title").innerText = "RECIBE";
         document.getElementById("label-destinos-title").innerText = "ORDENA";
 
-        // Cargar Dictamen de Sidebar Individual
-        const subInfo = reportState.flaggedSubjects.find(s => s.cuit === selectedCuit);
-        const antiquityDays = subInfo ? subInfo.antiquityDays : 0;
-        const valAlta = subInfo ? subInfo.altaDate : "N/A";
-        const resolvedLabelName = subInfo ? subInfo.denominacion : (denoms[selectedCuit] || "Sujeto Analizado");
-
-        const nodeRecibidoAmount = subjectTxs.filter(t => t.TIPO === "RECIBIDA").reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
-        const nodeRecibidoMiles = Math.round(nodeRecibidoAmount / 1000).toLocaleString("es-AR");
-
-        const nodeOrdenadoAmount = subjectTxs.filter(t => t.TIPO === "ORDENADA").reduce((sum, t) => sum + (parseFloat(t.MONTO) || 0), 0);
-        const nodeOrdenadoMiles = Math.round(nodeOrdenadoAmount / 1000).toLocaleString("es-AR");
-
-        const nodeAcumuladoAmount = nodeRecibidoAmount + nodeOrdenadoAmount;
-        const nodeAcumuladoMiles = Math.round(nodeAcumuladoAmount / 1000).toLocaleString("es-AR");
+        const nodeRecibidoMiles = Math.round(snap.totalRecibido / 1000).toLocaleString("es-AR");
+        const nodeOrdenadoMiles = Math.round(snap.totalOrdenado / 1000).toLocaleString("es-AR");
+        const nodeAcumuladoMiles = Math.round((snap.totalRecibido + snap.totalOrdenado) / 1000).toLocaleString("es-AR");
         const activeThresholdMiles = Math.round(reportState.alertThreshold / 1000).toLocaleString("es-AR");
 
-        const displayText = \`Inscripción en ARCA hace \${antiquityDays} d&iacute;as. Registra un total de $ \${nodeRecibidoMiles} miles de fondos recibidos y $ \${nodeOrdenadoMiles} miles de fondos ordenados, volumen acumulado $ \${nodeAcumuladoMiles} miles, superando el umbral de corte acumulado de $ \${activeThresholdMiles} miles.\`;
+        const displayText = \`Inscripción en ARCA hace \${snap.antiquityDays} d&iacute;as. Registra un total de $ \${nodeRecibidoMiles} miles de fondos recibidos y $ \${nodeOrdenadoMiles} miles de fondos ordenados, volumen acumulado $ \${nodeAcumuladoMiles} miles, superando el umbral de corte acumulado de $ \${activeThresholdMiles} miles.\`;
 
-        // Generar Sidebar HTML para Modo Individual
         const sidebarHtml = \`
           <div>
             <div class="flex items-center gap-1.5 pb-3 border-b border-zinc-800 mb-4 font-sans">
@@ -1063,49 +1135,31 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
                 </h3>
               </div>
             </div>
-            
             <div class="flex flex-col gap-4">
               <div>
-                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
-                  Denominaci&oacute;n
-                </span>
-                <span class="font-extrabold text-sm text-amber-300 block mt-0.5">
-                  \${resolvedLabelName}
-                </span>
-                <span class="font-mono text-xs font-semibold text-zinc-400 block mt-0.2 select-all">
-                  CUIT \${selectedCuit}
-                </span>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">Denominaci&oacute;n</span>
+                <span class="font-extrabold text-sm text-amber-300 block mt-0.5">\${snap.denominacion}</span>
+                <span class="font-mono text-xs font-semibold text-zinc-400 block mt-0.2 select-all">CUIT \${snap.cuit}</span>
               </div>
-
               <div class="grid grid-cols-2 gap-3 bg-zinc-900 p-2.5 rounded border border-zinc-850">
                 <div>
                   <span class="text-[8px] uppercase font-bold text-zinc-500 block tracking-wider">Categor&iacute;a</span>
-                  <span class="text-[11px] font-bold text-zinc-200 mt-0.5 block truncate">
-                    Sujeto de An&aacute;lisis
-                  </span>
+                  <span class="text-[11px] font-bold text-zinc-200 mt-0.5 block truncate">Sujeto de An&aacute;lisis</span>
                 </div>
                 <div class="text-center">
                   <span class="text-[8px] uppercase font-bold text-zinc-500 block tracking-wider">FECHA</span>
-                  <span class="text-[11px] font-mono font-bold text-amber-400 mt-0.5 block">
-                    \${valAlta}
-                  </span>
+                  <span class="text-[11px] font-mono font-bold text-amber-400 mt-0.5 block">\${snap.altaDate}</span>
                 </div>
               </div>
-
               <div>
-                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
-                  Antig&uuml;edad Fiscal Detectada
-                </span>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">Antig&uuml;edad Fiscal Detectada</span>
                 <span class="text-xs font-medium text-zinc-300 mt-0.5 block">
-                  <strong class="text-white font-mono font-bold">\${antiquityDays} d&iacute;as impositivos</strong>
+                  <strong class="text-white font-mono font-bold">\${snap.antiquityDays} d&iacute;as impositivos</strong>
                 </span>
               </div>
-
               <div class="mt-2">
-                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1">
-                  ALERTA DETECTADA
-                </span>
-                <p class="text-xs text-zinc-300 leading-relaxed font-normal bg-zinc-900 border border-zinc-850 p-3 rounded italic leading-relaxed">
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1">ALERTA DETECTADA</span>
+                <p class="text-xs text-zinc-300 leading-relaxed font-normal bg-zinc-900 border border-zinc-850 p-3 rounded italic">
                   \${displayText}
                 </p>
               </div>
@@ -1114,94 +1168,36 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         \`;
         document.getElementById("forensic-sidebar-content").innerHTML = sidebarHtml;
 
+        // Grafo: usa nodos/edges ya filtrados del snapshot
+        renderLocalSVGFromSnapshot(snap.graphNodes || [], snap.graphEdges || [], false, [snap.cuit], []);
+
       } else {
-        // Grupal Mode Consolidado
-        const groupInfo = reportState.groupNetwork;
-        titleDetailStr = "RED GLOBAL DE " + groupInfo.subjects.length + " EMPRESA" + (groupInfo.subjects.length !== 1 ? "S" : "") + " INTERCONECTADAS — Ref #" + groupInfo.groupId;
-        
-        const subSet = new Set(groupInfo.subjects);
-        const cpSet = new Set(groupInfo.commonCounterparts);
+        // MODO GRUPAL: datos ya calculados por la app al momento de exportar
+        receives = gs.receives || [];
+        sends = gs.sends || [];
+        titleDetailStr = "RED GLOBAL DE " + gs.subjects.length + " EMPRESA" + (gs.subjects.length !== 1 ? "S" : "") + " INTERCONECTADAS — Ref #" + gs.groupId;
 
-        // Transacciones de los integrantes del grupo
-        const groupTxs = txs.filter(t => subSet.has(t.CUIT));
-
-        // Consolidar RECIBE (Orígenes externos) - fondos que entran al grupo de contrapartes de afuera
-        const recMap = {};
-        groupTxs.filter(t => t.TIPO === 'RECIBIDA' && !subSet.has(t.CUIT_CONTRAPARTE)).forEach(t => {
-          const key = t.CUIT_CONTRAPARTE;
-          recMap[key] = (recMap[key] || 0) + parseFloat(t.MONTO);
-        });
-        receives = Object.keys(recMap).map(k => ({
-          cuit: k,
-          denom: denoms[k] || k,
-          sum: recMap[k]
-        })).sort((a,b) => b.sum - a.sum);
-
-        // Consolidar ORDENA (Destinos externos) - fondos que egresan del grupo a contrapartes de afuera
-        const sndMap = {};
-        groupTxs.filter(t => t.TIPO === 'ORDENADA' && !subSet.has(t.CUIT_CONTRAPARTE)).forEach(t => {
-          const key = t.CUIT_CONTRAPARTE;
-          sndMap[key] = (sndMap[key] || 0) + parseFloat(t.MONTO);
-        });
-        sends = Object.keys(sndMap).map(k => ({
-          cuit: k,
-          denom: denoms[k] || k,
-          sum: sndMap[k]
-        })).sort((a,b) => b.sum - a.sum);
-
-        // Consolidar MOVIMIENTOS INTERNOS (Traspasos entre integrantes y nodo común)
-        const intMap = {};
-        groupTxs.forEach(t => {
-          const isSenderInGroup = subSet.has(t.CUIT) || cpSet.has(t.CUIT);
-          const isReceiverInGroup = subSet.has(t.CUIT_CONTRAPARTE) || cpSet.has(t.CUIT_CONTRAPARTE);
-          
-          if (isSenderInGroup && isReceiverInGroup) {
-            // El dinero se mueve entre integrantes
-            const sender = t.TIPO === 'RECIBIDA' ? t.CUIT_CONTRAPARTE : t.CUIT;
-            const receiver = t.TIPO === 'RECIBIDA' ? t.CUIT : t.CUIT_CONTRAPARTE;
-            const pathKey = sender + "➔" + receiver;
-            intMap[pathKey] = (intMap[pathKey] || 0) + parseFloat(t.MONTO);
-          }
-        });
-        internals = Object.keys(intMap).map(key => {
-          const [sendKey, recvKey] = key.split("➔");
-          return {
-            senderCuit: sendKey,
-            senderDenom: denoms[sendKey] || sendKey,
-            receiverCuit: recvKey,
-            receiverDenom: denoms[recvKey] || recvKey,
-            sum: intMap[key]
-          };
-        }).sort((a,b) => b.sum - a.sum);
-
-        // Mostrar banner intragrupal
         document.getElementById("grupal-warning-banner").classList.remove("hidden");
         document.getElementById("label-origenes-title").innerText = "INYECCIONES DE CAPITAL EXTERNO";
         document.getElementById("label-destinos-title").innerText = "LIQUIDACIONES EXTERNAS DE RED";
 
-        // Cargar Dictamen de Sidebar Grupal
-        const subjectsList = groupInfo.subjects.map(c => (denoms[c] || getArgentineFallbackName(c, "Sujeto")) + " (CUIT " + c + ")");
+        const hasCommonCounterparts = gs.commonCounterparts.length > 0;
+        const subjectsList = gs.subjects.map(c => (denoms[c] || getArgentineFallbackName(c, "Sujeto")) + " (CUIT " + c + ")");
         const subjectsDetail = joinSpanish(subjectsList);
-        const hasCommonCounterparts = groupInfo.commonCounterparts.length > 0;
         let presentationText = "";
-        
         if (hasCommonCounterparts) {
-          const counterpartsList = groupInfo.commonCounterparts.map(c => (denoms[c] || getArgentineFallbackName(c, "Contraparte")) + " (CUIT " + c + ")");
-          const counterpartsDetail = joinSpanish(counterpartsList);
-          if (groupInfo.commonCounterparts.length === 1) {
-            presentationText = "presentando en com&uacute;n la siguiente contraparte: " + counterpartsDetail;
-          } else {
-            presentationText = "presentando en com&uacute;n las siguientes contrapartes: " + counterpartsDetail;
-          }
+          const cpList = gs.commonCounterparts.map(c => (denoms[c] || getArgentineFallbackName(c, "Contraparte")) + " (CUIT " + c + ")");
+          const cpDetail = joinSpanish(cpList);
+          presentationText = gs.commonCounterparts.length === 1
+            ? "presentando en com&uacute;n la siguiente contraparte: " + cpDetail
+            : "presentando en com&uacute;n las siguientes contrapartes: " + cpDetail;
         } else {
           presentationText = "presentando operaciones entre s&iacute;";
         }
-
         const groupMatchReason = "Se observan convergencia de flujos entre los sujetos analizados: " + subjectsDetail + ", " + presentationText + ".";
 
-        // Generar filas de sujetos involucrados para la sidebar grupal
         let subjectsRowsHtml = "";
-        groupInfo.subjects.forEach(cuit => {
+        gs.subjects.forEach(cuit => {
           const labelName = denoms[cuit] || getArgentineFallbackName(cuit, "Sujeto");
           const subjectData = reportState.flaggedSubjects.find(s => s.cuit === cuit);
           const alta = subjectData ? subjectData.altaDate : "N/A";
@@ -1219,45 +1215,30 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
             <div class="flex items-center gap-1.5 pb-3 border-b border-zinc-800 mb-4 font-sans">
               <svg class="w-5 h-5 text-blue-500 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
               <div>
-                <h3 class="font-extrabold text-[11px] uppercase tracking-widest text-white leading-none">
-                  Dictamen T&eacute;cnico Grupal
-                </h3>
+                <h3 class="font-extrabold text-[11px] uppercase tracking-widest text-white leading-none">Dictamen T&eacute;cnico Grupal</h3>
               </div>
             </div>
-
             <div class="flex flex-col gap-4">
               <div>
-                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">
-                  Grupo Bajo An&aacute;lisis
-                </span>
-                <span class="font-extrabold text-sm text-blue-400 block mt-0.5">
-                  Consorcio \${groupInfo.groupId}
-                </span>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">Grupo Bajo An&aacute;lisis</span>
+                <span class="font-extrabold text-sm text-blue-400 block mt-0.5">Consorcio \${gs.groupId}</span>
                 <span class="font-mono text-xs font-semibold text-zinc-400 block mt-0.2">
                   V&iacute;nculo: \${hasCommonCounterparts ? "Contraparte Com&uacute;n" : "Transacci&oacute;n Directa"}
                 </span>
               </div>
-
               <div>
-                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
-                  Sujetos Involucrados (Alta Reciente)
-                </span>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">Sujetos Involucrados (Alta Reciente)</span>
                 <div class="border border-zinc-800 rounded bg-zinc-900/60 overflow-hidden font-sans">
                   <div class="grid grid-cols-12 text-[8px] uppercase font-black text-zinc-500 bg-zinc-900 p-2 border-b border-zinc-800">
                     <div class="col-span-4 font-black">CUIT</div>
                     <div class="col-span-5 font-black">Denominaci&oacute;n</div>
                     <div class="col-span-3 text-right font-black">FECHA</div>
                   </div>
-                  <div class="flex flex-col">
-                    \${subjectsRowsHtml}
-                  </div>
+                  <div class="flex flex-col">\${subjectsRowsHtml}</div>
                 </div>
               </div>
-
               <div class="mt-1">
-                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
-                  ALERTA GRUPAL DETECTADA
-                </span>
+                <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">ALERTA GRUPAL DETECTADA</span>
                 <div class="p-3 bg-red-950/20 rounded border border-red-900/60 text-xs text-red-200 font-sans shadow-sm leading-relaxed">
                   <div class="flex gap-2 items-start">
                     <svg class="w-4 h-4 text-red-400 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
@@ -1272,25 +1253,21 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           </div>
         \`;
         document.getElementById("forensic-sidebar-content").innerHTML = sidebarHtml;
+
+        // Grafo: usa nodos/edges ya filtrados del snapshot grupal
+        renderLocalSVGFromSnapshot(gs.graphNodes || [], gs.graphEdges || [], true, gs.subjects, gs.commonCounterparts);
       }
+      // ────────────────────────────────────────────────────────────────────────
 
       // 2. Renderizar Tablas
       renderLocalTable("forensic-recibe-tbody", receives);
       renderLocalTable("forensic-ordena-tbody", sends);
-      
+
       const recTotalSum = receives.reduce((a,b) => a + b.sum, 0);
       const sndTotalSum = sends.reduce((a,b) => a + b.sum, 0);
-      
       document.getElementById("forensic-recibe-total").innerText = formatInThousands(recTotalSum);
       document.getElementById("forensic-ordena-total").innerText = formatInThousands(sndTotalSum);
-
-      // Actualizar Encabezados
       document.getElementById("forensic-active-detail-text").innerHTML = titleDetailStr;
-
-      // 3. Dibujar Grafo SVG
-      const activeSubjects = isGrupal ? reportState.groupNetwork.subjects : [selectedCuit];
-      const activeCommonCounterparts = isGrupal ? reportState.groupNetwork.commonCounterparts : [];
-      renderLocalSVG(activeSubjects, activeCommonCounterparts, isGrupal);
     }
 
     // Renderizar Tablas Locales
@@ -1366,10 +1343,9 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       }
     }
 
-    // Dibujar el Grafo en el SVG del Reporte Descargado
-    // Layout fijo izquierda-centro-derecha (idéntico al componente NetworkGraph de la app en vivo),
-    // sin simulación de físicas: las posiciones son estables y predecibles.
-    function renderLocalSVG(activeSubjects, activeCommonCounterparts, isGrupal) {
+    // Dibujar el Grafo en el SVG del Reporte — usa nodos/edges ya filtrados del snapshot.
+    // No vuelve a filtrar el grafo completo: recibe exactamente lo que la app tenía en pantalla.
+    function renderLocalSVGFromSnapshot(snapshotNodes, snapshotEdges, isGrupal, activeSubjects, activeCommonCounterparts) {
       const svg = document.getElementById("forensic-network-svg");
       svg.innerHTML = ''; // Limpiar
 
@@ -1384,20 +1360,12 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       const vbHeight = 380;
       const marginY = 50;
       const denoms = reportState.cuitDenominacionesMap || {};
-      const allGraphNodes = reportState.graphNodes || [];
-      const allGraphEdges = reportState.graphEdges || [];
 
-      // --- Filtrar el grafo completo a los nodos/edges relevantes para el sujeto o grupo activo ---
-      // (réplica de activeUnconsolidatedGraphData de la app: edges conectados a algún sujeto activo,
-      // más todos los nodos involucrados en esas edges - incluye contrapartes de segundo nivel)
-      const subjectSet = new Set(activeSubjects);
-      const filteredEdges = allGraphEdges.filter(e => subjectSet.has(e.source) || subjectSet.has(e.target));
-      const involvedIds = new Set(activeSubjects);
-      filteredEdges.forEach(e => {
-        involvedIds.add(e.source);
-        involvedIds.add(e.target);
-      });
-      const filteredNodes = allGraphNodes.filter(n => involvedIds.has(n.id));
+      // Usar directamente los nodos/edges del snapshot — ya vienen filtrados por la app
+      const filteredNodes = snapshotNodes || [];
+      const filteredEdges = snapshotEdges || [];
+
+      const subjectSet = new Set(activeSubjects || []);
 
       // --- Categorizar contrapartes (réplica de consolidateGraphData de la app) ---
       const commonSet = new Set(activeCommonCounterparts);
