@@ -631,6 +631,7 @@ export default function App() {
       }
 
       const data = await response.json();
+      setDictamenHeight(0); // reset: el grafo vuelve a MIN_HEIGHT y crece con el nuevo dictamen
       setAnalysisResult(data.analysis);
       setAnalyzerEngineName(data.engine);
     } catch (err: any) {
@@ -652,15 +653,19 @@ export default function App() {
   const [dictamenHeight, setDictamenHeight] = useState(0);
 
   // Medir el dictamen para pasarle la altura al grafo (solo crece)
+  // Sin array de dependencias: corre en cada render hasta que el ref existe,
+  // garantizando que el observer se registre aunque el dictamen aparezca tarde.
   useEffect(() => {
-    if (!dictamenRef.current) return;
+    const el = dictamenRef.current;
+    if (!el) return;
+    // Disparo inmediato para capturar la altura actual sin esperar un resize
+    setDictamenHeight(prev => Math.max(prev, el.offsetHeight));
     const obs = new ResizeObserver(() => {
-      const h = dictamenRef.current?.offsetHeight || 0;
-      setDictamenHeight(prev => Math.max(prev, h));
+      setDictamenHeight(prev => Math.max(prev, el.offsetHeight));
     });
-    obs.observe(dictamenRef.current);
+    obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }); // sin [], corre en cada render
 
   // Limpia todas las tablas en Supabase y resetea el estado local.
   const handleClearAllData = async () => {
@@ -1122,6 +1127,7 @@ export default function App() {
   useEffect(() => {
     setForensicMode("individual");
     setSelectedGroupId(null);
+    setDictamenHeight(0); // reset altura al cambiar preset
   }, [selectedPresetId]);
 
   // Detected group flows of multiple interconnected subjects under analysis
@@ -2419,17 +2425,54 @@ export default function App() {
                     <strong className="text-amber-950 uppercase font-black text-[11px] block tracking-wider mb-1.5">
                       💡 ¿QUÉ INCLUYE ESTA SECCIÓN DE ANÁLISIS CONSOLIDADO GRUPAL?
                     </strong>
-                    Este panel fusiona la totalidad de los flujos de fondos correspondientes a todos los sujetos analizados del grupo.
-                    Muestra consolidado los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                    Permite visualizar de manera inmediata nodos en común — en total{" "}
-                    <strong>
-                      {(() => {
-                        const pairwise = (activeGroup as any).pairwiseCommon as { subA: string; subB: string; counterparts: string[] }[] || [];
-                        const uniqueInPairs = new Set(pairwise.flatMap((p: any) => p.counterparts));
-                        return uniqueInPairs.size;
-                      })()} nodo{((() => { const p = (activeGroup as any).pairwiseCommon as any[] || []; const s = new Set(p.flatMap((x:any)=>x.counterparts)); return s.size; })()) !== 1 ? "s" : ""}
-                    </strong>{" "}
-                    (incluyendo intersecciones entre pares de sujetos obligados y el grupo completo) — que actúan como el vaso comunicante que unifica e interconecta las operaciones financieras del grupo.
+                    {(() => {
+                      const pairwise = (activeGroup as any).pairwiseCommon as { subA: string; subB: string; counterparts: string[] }[] || [];
+                      const uniqueInPairs = new Set(pairwise.flatMap((p: any) => p.counterparts));
+                      const allGroupCommon: string[] = (activeGroup as any).commonCounterparts || [];
+                      const totalUnique = new Set([...uniqueInPairs, ...allGroupCommon]);
+                      const total = totalUnique.size;
+                      const nSujetos = activeGroup?.subjects?.length || 0;
+                      const nDuplas = pairwise.length;
+
+                      if (total === 0) {
+                        return (
+                          <>
+                            Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
+                            mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
+                            El análisis transaccional del período evaluado <strong>no evidencia contrapartes compartidas</strong> entre los sujetos del grupo,
+                            aunque la vinculación entre ellos puede responder a otros elementos no reflejados en los flujos analizados.
+                          </>
+                        );
+                      }
+
+                      if (total === 1) {
+                        return (
+                          <>
+                            Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
+                            mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
+                            Se identifica <strong>1 contraparte compartida</strong> que opera como punto de conexión entre sujetos del grupo
+                            {nDuplas > 0 ? `, presente en ${nDuplas} par${nDuplas !== 1 ? "es" : ""} de sujetos analizados` : ""}.
+                          </>
+                        );
+                      }
+
+                      const universales = allGroupCommon.length;
+
+                      return (
+                        <>
+                          Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
+                          mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
+                          Se detectaron <strong>{total} contrapartes compartidas</strong> distribuidas entre distintos pares del grupo
+                          {nDuplas > 0 ? `, identificadas en ${nDuplas} combinación${nDuplas !== 1 ? "es" : ""} de sujetos` : ""}.
+                          {universales > 0 && (
+                            <> De estas, <strong>{universales} {universales === 1 ? "contraparte es común" : "contrapartes son comunes"} a la totalidad del grupo</strong>.</>
+                          )}
+                          {universales === 0 && uniqueInPairs.size > 0 && (
+                            <> Ninguna contraparte es común a la totalidad del grupo, aunque <strong>{uniqueInPairs.size}</strong> de ellas vincula a más de un sujeto analizado.</>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -2732,13 +2775,28 @@ export default function App() {
                           return mainTxt + restTxt;
                         };
 
-                        const ordenaLine = recibeList.length > 0 ? buildCPLine(recibeList, recibeTotal) : null;
-                        const recibeLine = ordenaList.length > 0 ? buildCPLine(ordenaList, ordenaTotal) : null;
+                        // Filtrar recibeList y ordenaList a solo las contrapartes que son nodos comunes
+                        const commonSet = new Set(uniqueCommonInPairs);
+
+                        const commonOrdenantes = recibeList.filter(x => commonSet.has(x.cuit));
+                        const commonOrdenanteTotal = commonOrdenantes.reduce((s, x) => s + x.sum, 0);
+                        const ordenaLine = commonOrdenantes.length > 0
+                          ? buildCPLine(commonOrdenantes, commonOrdenanteTotal)
+                          : null;
+
+                        const commonReceptoras = ordenaList.filter(x => commonSet.has(x.cuit));
+                        const commonReceptoraTotal = commonReceptoras.reduce((s, x) => s + x.sum, 0);
+                        const recibeLine = commonReceptoras.length > 0
+                          ? buildCPLine(commonReceptoras, commonReceptoraTotal)
+                          : null;
 
                         const allCPsFull = allGroupCommon.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
 
-                        // Total de nodos en común contando pares únicos + grupo completo
-                        const uniqueCommonInPairs = new Set(pairwiseCommon.flatMap(p => p.counterparts));
+                        // Total de nodos en común: unión de pairwiseCommon + commonCounterparts del grupo
+                        const uniqueCommonInPairs = new Set([
+                          ...pairwiseCommon.flatMap(p => p.counterparts),
+                          ...allGroupCommon
+                        ]);
                         const totalNodosComunes = uniqueCommonInPairs.size;
 
                         return (
@@ -2755,7 +2813,7 @@ export default function App() {
                               <span className="font-mono text-xs font-semibold text-zinc-400 block mt-0.2">
                                 Vínculo: {hasCommonCounterparts ? "Contraparte Común" : "Transacción Directa"}
                                 {totalNodosComunes > 0 && (
-                                  <span className="ml-2 text-blue-400 font-bold">· {totalNodosComunes} nodo{totalNodosComunes !== 1 ? "s" : ""} en común</span>
+                                  <span className="ml-2 text-blue-400 font-bold">· {totalNodosComunes} contraparte{totalNodosComunes !== 1 ? "s" : ""} compartida{totalNodosComunes !== 1 ? "s" : ""}</span>
                                 )}
                               </span>
                             </div>
@@ -2878,12 +2936,17 @@ export default function App() {
                                   <div className="flex-1 space-y-1.5">
                                     <strong className="text-red-300 block uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
                                     <p>Se observa convergencia de flujos entre los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>
-                                    {totalNodosComunes > 0 && <>, con <strong className="text-red-100">{totalNodosComunes} nodo{totalNodosComunes !== 1 ? "s" : ""} en común</strong> identificado{totalNodosComunes !== 1 ? "s" : ""} entre pares y/o el grupo completo</>}.</p>
+                                    {totalNodosComunes > 0 && (
+                                      <>, con <strong className="text-red-100">{totalNodosComunes} contraparte{totalNodosComunes !== 1 ? "s" : ""} compartida{totalNodosComunes !== 1 ? "s" : ""}</strong> identificada{totalNodosComunes !== 1 ? "s" : ""} entre pares del grupo</>
+                                    )}.</p>
                                     {ordenaLine && (
                                       <p><span className="text-red-300 font-bold">Como ordenantes comunes:</span> {ordenaLine}.</p>
                                     )}
                                     {recibeLine && (
                                       <p><span className="text-red-300 font-bold">Como receptoras comunes:</span> {recibeLine}.</p>
+                                    )}
+                                    {!ordenaLine && !recibeLine && hasCommonCounterparts && (
+                                      <p>Las contrapartes compartidas no se distinguen por dirección de flujo predominante.</p>
                                     )}
                                     {!hasCommonCounterparts && (
                                       <p>Presentan operaciones directas entre sí.</p>
