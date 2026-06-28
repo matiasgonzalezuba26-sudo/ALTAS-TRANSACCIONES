@@ -1263,6 +1263,114 @@ export default function App() {
   const currentAMLState = useMemo(() => {
     const selectedPresetName = PRESET_CASES.find(c => c.id === selectedPresetId)?.name || "Caso Custom/Archivo Subido";
     const groupFallback = activeGroup || (detectedGroupFlows.length > 0 ? detectedGroupFlows[0] : null);
+
+    // ── Construir individualSnapshots: uno por cada CUIT alertado ─────────────
+    // Usamos exactamente los mismos cálculos que ya hace la app para las tablas de flujo,
+    // para garantizar que el reporte HTML sea un espejo fiel sin recalcular nada.
+    const individualSnapshots = positiveCases.map(node => {
+      const cuit = node.id;
+      const subjectTxs = filteredTransactions.filter(tx => tx.CUIT === cuit);
+
+      const totalRecibido = subjectTxs
+        .filter(tx => tx.TIPO === "RECIBIDA")
+        .reduce((s, tx) => s + parseMonto(tx.MONTO).amount, 0);
+      const totalOrdenado = subjectTxs
+        .filter(tx => tx.TIPO === "ORDENADA")
+        .reduce((s, tx) => s + parseMonto(tx.MONTO).amount, 0);
+
+      const recibeMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      subjectTxs.filter(tx => tx.TIPO === "RECIBIDA").forEach(tx => {
+        const k = tx.CUIT_CONTRAPARTE;
+        const d = cuitDenominacionesMap[k] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(k, "Contraparte");
+        if (!recibeMap[k]) recibeMap[k] = { cuit: k, denom: d, sum: 0 };
+        recibeMap[k].sum += parseMonto(tx.MONTO).amount;
+      });
+      const ordenaMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      subjectTxs.filter(tx => tx.TIPO === "ORDENADA").forEach(tx => {
+        const k = tx.CUIT_CONTRAPARTE;
+        const d = cuitDenominacionesMap[k] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(k, "Contraparte");
+        if (!ordenaMap[k]) ordenaMap[k] = { cuit: k, denom: d, sum: 0 };
+        ordenaMap[k].sum += parseMonto(tx.MONTO).amount;
+      });
+
+      // Nodos/edges ya filtrados para este CUIT (réplica de forensicGraphData)
+      const iEdges = (analysisResult?.edges || []).filter(e => e.source === cuit || e.target === cuit);
+      const iIds = new Set<string>([cuit]);
+      iEdges.forEach(e => { iIds.add(e.source); iIds.add(e.target); });
+      const iNodes = (analysisResult?.nodes || []).filter(n => iIds.has(n.id));
+
+      return {
+        cuit,
+        denominacion: cuitDenominacionesMap[cuit] || `Sujeto Fiscal ${cuit}`,
+        altaDate: node.altaDate,
+        antiquityDays: node.antiquity_days,
+        totalRecibido,
+        totalOrdenado,
+        receives: Object.values(recibeMap).sort((a, b) => b.sum - a.sum),
+        sends: Object.values(ordenaMap).sort((a, b) => b.sum - a.sum),
+        graphNodes: iNodes,
+        graphEdges: iEdges,
+      };
+    });
+
+    // ── Construir groupSnapshot ───────────────────────────────────────────────
+    let groupSnapshot = null;
+    if (groupFallback) {
+      const subjects = groupFallback.subjects;
+      const recibeMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      const ordenaMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+      const internasMap: Record<string, { senderCuit: string; senderDenom: string; receiverCuit: string; receiverDenom: string; sum: number }> = {};
+
+      filteredTransactions.forEach(tx => {
+        const amount = parseMonto(tx.MONTO).amount;
+        const sender = tx.TIPO === "RECIBIDA" ? tx.CUIT_CONTRAPARTE : tx.CUIT;
+        const receiver = tx.TIPO === "RECIBIDA" ? tx.CUIT : tx.CUIT_CONTRAPARTE;
+        const isSenderIn = subjects.includes(sender);
+        const isReceiverIn = subjects.includes(receiver);
+
+        if (isSenderIn && isReceiverIn) {
+          const key = `${sender}_${receiver}`;
+          if (!internasMap[key]) internasMap[key] = {
+            senderCuit: sender, senderDenom: cuitDenominacionesMap[sender] || getArgentineFallbackName(sender, "Sujeto"),
+            receiverCuit: receiver, receiverDenom: cuitDenominacionesMap[receiver] || getArgentineFallbackName(receiver, "Sujeto"),
+            sum: 0
+          };
+          internasMap[key].sum += amount;
+        } else if (!isSenderIn && isReceiverIn) {
+          const d = cuitDenominacionesMap[sender] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(sender, "Contraparte");
+          if (!recibeMap[sender]) recibeMap[sender] = { cuit: sender, denom: d, sum: 0 };
+          recibeMap[sender].sum += amount;
+        } else if (isSenderIn && !isReceiverIn) {
+          const d = cuitDenominacionesMap[receiver] || tx.DENOMINACION_CONTRAPARTE || getArgentineFallbackName(receiver, "Contraparte");
+          if (!ordenaMap[receiver]) ordenaMap[receiver] = { cuit: receiver, denom: d, sum: 0 };
+          ordenaMap[receiver].sum += amount;
+        }
+      });
+
+      // Nodos/edges ya filtrados para el grupo (réplica de activeUnconsolidatedGraphData grupal)
+      const gEdges = (analysisResult?.edges || []).filter(e => subjects.includes(e.source) || subjects.includes(e.target));
+      const gIds = new Set<string>(subjects);
+      gEdges.forEach(e => { gIds.add(e.source); gIds.add(e.target); });
+      const gNodes = (analysisResult?.nodes || []).filter(n => gIds.has(n.id));
+
+      const totalVol = Object.values(recibeMap).reduce((s, v) => s + v.sum, 0)
+                     + Object.values(ordenaMap).reduce((s, v) => s + v.sum, 0);
+
+      groupSnapshot = {
+        groupId: groupFallback.id,
+        subjects,
+        commonCounterparts: groupFallback.commonCounterparts,
+        totalIntergroupVolume: totalVol,
+        detectedLoopsCount: subjects.length > 2 ? 1 : 0,
+        receives: Object.values(recibeMap).sort((a, b) => b.sum - a.sum),
+        sends: Object.values(ordenaMap).sort((a, b) => b.sum - a.sum),
+        internals: Object.values(internasMap).sort((a, b) => b.sum - a.sum),
+        graphNodes: gNodes,
+        graphEdges: gEdges,
+      };
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     return captureCurrentAMLState({
       analysisMonth,
       lookbackMonths,
@@ -1280,6 +1388,8 @@ export default function App() {
       selectedGroupId: selectedGroupId || (groupFallback ? groupFallback.id : undefined),
       graphNodes: analysisResult?.nodes || [],
       graphEdges: analysisResult?.edges || [],
+      individualSnapshots,
+      groupSnapshot,
     });
   }, [analysisMonth, lookbackMonths, threshold, selectedPresetId, filteredTransactions, positiveCases, cuitDenominacionesMap, activeGroup, detectedGroupFlows, antiquityLimit, activeTab, forensicMode, currentCuit, selectedGroupId, analysisResult]);
 
