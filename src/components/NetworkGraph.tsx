@@ -11,6 +11,7 @@ interface NetworkGraphProps {
   currentCuit: string | null;
   commonCounterparts?: string[];
   isGroupMode?: boolean;
+  dictamenHeight?: number; // altura del panel de dictamen en px — el grafo crece para igualarlo
 }
 
 interface GroupNode {
@@ -53,10 +54,13 @@ function formatK(n: number): string {
 
 export default function NetworkGraph({
   nodes, edges, selectedNodeId, onSelectNode,
-  cuitDenominacionesMap, currentCuit, commonCounterparts = [], isGroupMode = false
+  cuitDenominacionesMap, currentCuit, commonCounterparts = [], isGroupMode = false,
+  dictamenHeight = 0
 }: NetworkGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 520 });
+  const MIN_HEIGHT = 520;
+  const [dimensions, setDimensions] = useState({ width: 800, height: MIN_HEIGHT });
+  const [graphHeight, setGraphHeight] = useState(MIN_HEIGHT);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -66,11 +70,23 @@ export default function NetworkGraph({
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
 
+  // Crece con el dictamen pero nunca se achica del mínimo
+  useEffect(() => {
+    if (dictamenHeight > 0) {
+      const target = Math.max(MIN_HEIGHT, dictamenHeight);
+      setGraphHeight(prev => Math.max(prev, target));
+      setDimensions(prev => ({ ...prev, height: Math.max(prev.height, target) }));
+    }
+  }, [dictamenHeight]);
+
   const isLargeNetwork = nodes.length > 6;
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const update = () => setDimensions({ width: containerRef.current?.clientWidth || 800, height: 520 });
+    const update = () => {
+      const w = containerRef.current?.clientWidth || 800;
+      setDimensions(prev => ({ width: w, height: prev.height }));
+    };
     update();
     const obs = new ResizeObserver(update);
     obs.observe(containerRef.current);
@@ -406,7 +422,8 @@ export default function NetworkGraph({
         {/* Canvas */}
         <div ref={containerRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
-          className={`h-[520px] select-none ${isDragging || draggedNodeId ? "cursor-grabbing" : "cursor-grab"}`}>
+          style={{ height: `${graphHeight}px` }}
+          className={`select-none ${isDragging || draggedNodeId ? "cursor-grabbing" : "cursor-grab"}`}>
           <svg width="100%" height="100%" viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}>
             <defs>
               <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
