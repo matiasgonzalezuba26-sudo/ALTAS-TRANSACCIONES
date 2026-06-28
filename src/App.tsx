@@ -648,6 +648,19 @@ export default function App() {
 
   const arcaFileInputRef = useRef<HTMLInputElement>(null);
   const opsFileInputRef = useRef<HTMLInputElement>(null);
+  const dictamenRef = useRef<HTMLDivElement>(null);
+  const [dictamenHeight, setDictamenHeight] = useState(0);
+
+  // Medir el dictamen para pasarle la altura al grafo (solo crece)
+  useEffect(() => {
+    if (!dictamenRef.current) return;
+    const obs = new ResizeObserver(() => {
+      const h = dictamenRef.current?.offsetHeight || 0;
+      setDictamenHeight(prev => Math.max(prev, h));
+    });
+    obs.observe(dictamenRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   // Limpia todas las tablas en Supabase y resetea el estado local.
   const handleClearAllData = async () => {
@@ -1178,6 +1191,7 @@ export default function App() {
       name: string;
       subjects: string[];
       commonCounterparts: string[];
+      pairwiseCommon: { subA: string; subB: string; counterparts: string[] }[];
     }[] = [];
 
     Object.values(components).forEach(members => {
@@ -1195,6 +1209,19 @@ export default function App() {
         .sort((a, b) => b[1] - a[1]) // más compartidas primero
         .map(([cp]) => cp);
 
+      // Intersecciones por PAR de sujetos obligados (SO_i ∩ SO_j)
+      const pairwiseCommon: { subA: string; subB: string; counterparts: string[] }[] = [];
+      for (let i = 0; i < members.length; i++) {
+        for (let j = i + 1; j < members.length; j++) {
+          const subA = members[i];
+          const subB = members[j];
+          const shared = [...counterpartsBySubject[subA]].filter(cp => counterpartsBySubject[subB].has(cp));
+          if (shared.length > 0) {
+            pairwiseCommon.push({ subA, subB, counterparts: shared });
+          }
+        }
+      }
+
       // Nombre descriptivo del grupo
       const names = members.map(id => {
         const denom = cuitDenominacionesMap[id] || id;
@@ -1208,7 +1235,8 @@ export default function App() {
         id: `grupo-${members.sort().join("-")}`,
         name: groupName,
         subjects: members,
-        commonCounterparts
+        commonCounterparts,
+        pairwiseCommon
       });
     });
 
@@ -2245,6 +2273,7 @@ export default function App() {
                     currentCuit={currentCuit}
                     commonCounterparts={activeGroup?.commonCounterparts || []}
                     isGroupMode={forensicMode === "grupal"}
+                    dictamenHeight={dictamenHeight}
                   />
                 </div>
               )}
@@ -2282,7 +2311,15 @@ export default function App() {
                     </strong>
                     Este panel fusiona la totalidad de los flujos de fondos correspondientes a todos los sujetos analizados del grupo.
                     Muestra consolidado los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                    Permite visualizar de manera inmediata nodos en común — en total <strong>{activeGroup.commonCounterparts.length} empresa{activeGroup.commonCounterparts.length !== 1 ? "s" : ""}</strong> — que actúan como el vaso comunicante que unifica e interconecta las operaciones financieras del grupo.
+                    Permite visualizar de manera inmediata nodos en común — en total{" "}
+                    <strong>
+                      {(() => {
+                        const pairwise = (activeGroup as any).pairwiseCommon as { subA: string; subB: string; counterparts: string[] }[] || [];
+                        const uniqueInPairs = new Set(pairwise.flatMap((p: any) => p.counterparts));
+                        return uniqueInPairs.size;
+                      })()} nodo{((() => { const p = (activeGroup as any).pairwiseCommon as any[] || []; const s = new Set(p.flatMap((x:any)=>x.counterparts)); return s.size; })()) !== 1 ? "s" : ""}
+                    </strong>{" "}
+                    (incluyendo intersecciones entre pares de sujetos obligados y el grupo completo) — que actúan como el vaso comunicante que unifica e interconecta las operaciones financieras del grupo.
                   </div>
                 )}
 
@@ -2427,7 +2464,7 @@ export default function App() {
             <div className="lg:col-span-1 lg:col-start-3 lg:row-start-1 flex flex-col gap-6">
               
               {/* Detailed focus card */}
-              <div className="bg-zinc-950 text-white rounded-xl p-5 shadow-md border border-zinc-800 flex flex-col justify-between min-h-[400px]">
+              <div ref={dictamenRef} className="bg-zinc-950 text-white rounded-xl p-5 shadow-md border border-zinc-800 flex flex-col justify-between min-h-[400px]">
                 
                 <div>
                   <div className="flex items-center gap-1.5 pb-3 border-b border-zinc-800 mb-4 font-sans">
@@ -2561,10 +2598,14 @@ export default function App() {
                       (() => {
                         const subjects = activeGroup.subjects;
                         const hasCommonCounterparts = activeGroup.commonCounterparts.length > 0;
+                        const pairwiseCommon = (activeGroup as any).pairwiseCommon as { subA: string; subB: string; counterparts: string[] }[] || [];
                         const TOP_CP = 4;
 
-                        // ORDENANTES = top de FONDOS ENTRANTES (recibeList): envían plata a los sujetos
-                        // RECEPTORAS = top de EGRESOS (ordenaList): reciben plata de los sujetos
+                        // Nodos en común ENTRE TODOS (intersección del grupo completo)
+                        const allGroupCommon = activeGroup.commonCounterparts;
+
+                        // ORDENANTES = top de FONDOS ENTRANTES (recibeList)
+                        // RECEPTORAS = top de EGRESOS (ordenaList)
                         const buildCPLine = (items: {cuit: string; denom: string; sum: number}[], total: number) => {
                           const main = items.slice(0, TOP_CP);
                           const rest = items.slice(TOP_CP);
@@ -2581,14 +2622,14 @@ export default function App() {
                           return mainTxt + restTxt;
                         };
 
-                        const ordenaLine = recibeList.length > 0
-                          ? buildCPLine(recibeList, recibeTotal)
-                          : null;
-                        const recibeLine = ordenaList.length > 0
-                          ? buildCPLine(ordenaList, ordenaTotal)
-                          : null;
+                        const ordenaLine = recibeList.length > 0 ? buildCPLine(recibeList, recibeTotal) : null;
+                        const recibeLine = ordenaList.length > 0 ? buildCPLine(ordenaList, ordenaTotal) : null;
 
-                        const allCPsFull = activeGroup.commonCounterparts.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
+                        const allCPsFull = allGroupCommon.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
+
+                        // Total de nodos en común contando pares únicos + grupo completo
+                        const uniqueCommonInPairs = new Set(pairwiseCommon.flatMap(p => p.counterparts));
+                        const totalNodosComunes = uniqueCommonInPairs.size;
 
                         return (
                           <div className="flex flex-col gap-4">
@@ -2603,6 +2644,9 @@ export default function App() {
                               </span>
                               <span className="font-mono text-xs font-semibold text-zinc-400 block mt-0.2">
                                 Vínculo: {hasCommonCounterparts ? "Contraparte Común" : "Transacción Directa"}
+                                {totalNodosComunes > 0 && (
+                                  <span className="ml-2 text-blue-400 font-bold">· {totalNodosComunes} nodo{totalNodosComunes !== 1 ? "s" : ""} en común</span>
+                                )}
                               </span>
                             </div>
 
@@ -2612,13 +2656,11 @@ export default function App() {
                                 Sujetos Involucrados (Alta Reciente)
                               </span>
                               <div className="border border-zinc-800 rounded bg-zinc-900/60 overflow-hidden font-sans">
-                                {/* Header row */}
                                 <div className="grid grid-cols-12 text-[10px] uppercase font-black text-zinc-500 bg-zinc-900 px-3 py-2 border-b border-zinc-800">
                                   <div className="col-span-4 font-black">CUIT</div>
                                   <div className="col-span-5 font-black">Denominación</div>
                                   <div className="col-span-3 text-right font-black">FECHA</div>
                                 </div>
-                                {/* Rows */}
                                 <div className="flex flex-col">
                                   {subjects.map(cuit => {
                                     const labelName = cuitDenominacionesMap[cuit] || getArgentineFallbackName(cuit, "Sujeto");
@@ -2635,7 +2677,87 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Restored Group Detected Alert */}
+                            {/* NODOS EN COMÚN POR PARES DE SOs */}
+                            {pairwiseCommon.length > 0 && (
+                              <div>
+                                <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                                  Nodos en Común entre Pares de Sujetos Obligados
+                                </span>
+                                <div className="flex flex-col gap-1.5">
+                                  {pairwiseCommon.map((pair, idx) => {
+                                    const nameA = cuitDenominacionesMap[pair.subA] || getArgentineFallbackName(pair.subA, "Sujeto");
+                                    const nameB = cuitDenominacionesMap[pair.subB] || getArgentineFallbackName(pair.subB, "Sujeto");
+                                    const topCPs = pair.counterparts.slice(0, 3);
+                                    const restCount = pair.counterparts.length - topCPs.length;
+                                    return (
+                                      <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded p-2.5">
+                                        <div className="flex items-center gap-1.5 mb-1.5">
+                                          <span className="text-[9px] font-extrabold text-blue-400 uppercase tracking-wider">
+                                            SO {subjects.indexOf(pair.subA) + 1} ∩ SO {subjects.indexOf(pair.subB) + 1}
+                                          </span>
+                                          <span className="text-[9px] text-zinc-500">·</span>
+                                          <span className="text-[9px] font-bold text-zinc-400">{pair.counterparts.length} nodo{pair.counterparts.length !== 1 ? "s" : ""} compartido{pair.counterparts.length !== 1 ? "s" : ""}</span>
+                                        </div>
+                                        <div className="text-[9px] text-zinc-500 mb-1 truncate" title={`${nameA} / ${nameB}`}>
+                                          <span className="text-zinc-300 font-medium">{nameA.split(" ").slice(0, 2).join(" ")}</span>
+                                          <span className="text-zinc-600 mx-1">↔</span>
+                                          <span className="text-zinc-300 font-medium">{nameB.split(" ").slice(0, 2).join(" ")}</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                          {topCPs.map(cp => (
+                                            <span key={cp} className="text-[8px] font-mono bg-blue-950/60 text-blue-300 border border-blue-900/50 px-1.5 py-0.5 rounded" title={cuitDenominacionesMap[cp] || cp}>
+                                              {(cuitDenominacionesMap[cp] || cp).split(" ").slice(0, 2).join(" ")}
+                                            </span>
+                                          ))}
+                                          {restCount > 0 && (
+                                            <span className="text-[8px] font-bold text-zinc-500 px-1 py-0.5">+{restCount} más</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* NODOS EN COMÚN DEL GRUPO COMPLETO */}
+                            {allGroupCommon.length > 0 && (
+                              <div>
+                                <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
+                                  Nodos en Común — Grupo Completo ({subjects.length} SOs)
+                                </span>
+                                <div className="bg-zinc-900 border border-blue-900/50 rounded p-2.5">
+                                  <div className="flex items-center gap-1.5 mb-2">
+                                    <span className="text-[9px] font-extrabold text-blue-400 uppercase tracking-wider">
+                                      ∩ {subjects.length} Sujetos
+                                    </span>
+                                    <span className="text-[9px] text-zinc-500">·</span>
+                                    <span className="text-[9px] font-bold text-zinc-400">{allGroupCommon.length} contraparte{allGroupCommon.length !== 1 ? "s" : ""} compartida{allGroupCommon.length !== 1 ? "s" : ""} por todos</span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {allGroupCommon.slice(0, TOP_CP).map(cp => (
+                                      <span key={cp} className="text-[8px] font-mono bg-blue-900/40 text-blue-200 border border-blue-800/50 px-1.5 py-0.5 rounded" title={`CUIT ${cp}`}>
+                                        {(cuitDenominacionesMap[cp] || getArgentineFallbackName(cp, "Contraparte")).split(" ").slice(0, 3).join(" ")}
+                                      </span>
+                                    ))}
+                                    {allGroupCommon.length > TOP_CP && (
+                                      <details className="w-full mt-1">
+                                        <summary className="cursor-pointer text-[9px] text-blue-400 font-bold select-none hover:text-blue-300">
+                                          Ver todas ({allGroupCommon.length})
+                                        </summary>
+                                        <ul className="mt-1 space-y-0.5 text-[9px] text-blue-300 list-disc list-inside">
+                                          {allGroupCommon.map((cp, i) => (
+                                            <li key={i}>{cuitDenominacionesMap[cp] || getArgentineFallbackName(cp, "Contraparte")} — CUIT {cp}</li>
+                                          ))}
+                                        </ul>
+                                      </details>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Alerta grupal */}
                             <div className="mt-1">
                               <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
                                 ALERTA GRUPAL DETECTADA
@@ -2645,7 +2767,8 @@ export default function App() {
                                   <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
                                   <div className="flex-1 space-y-1.5">
                                     <strong className="text-red-300 block uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
-                                    <p>Se observan convergencia de flujos entre los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>.</p>
+                                    <p>Se observa convergencia de flujos entre los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>
+                                    {totalNodosComunes > 0 && <>, con <strong className="text-red-100">{totalNodosComunes} nodo{totalNodosComunes !== 1 ? "s" : ""} en común</strong> identificado{totalNodosComunes !== 1 ? "s" : ""} entre pares y/o el grupo completo</>}.</p>
                                     {ordenaLine && (
                                       <p><span className="text-red-300 font-bold">Como ordenantes comunes:</span> {ordenaLine}.</p>
                                     )}
