@@ -1357,9 +1357,14 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       graphSelectedId = null;
 
       const vbWidth = 760;
-      const vbHeight = 380;
+      // Altura dinámica: mínimo 380px, crece 55px por sujeto analizado sobre 4
+      const subjectCount = (snapshotNodes || []).filter((n: any) => n.type === "ANALIZADO").length || (activeSubjects || []).length;
+      const vbHeight = Math.max(380, 260 + subjectCount * 55);
       const marginY = 50;
       const denoms = reportState.cuitDenominacionesMap || {};
+
+      // Actualizar el viewBox del SVG en el DOM para que refleje la nueva altura
+      svg.setAttribute("viewBox", "0 0 " + vbWidth + " " + vbHeight);
 
       // Usar directamente los nodos/edges del snapshot — ya vienen filtrados por la app
       const filteredNodes = snapshotNodes || [];
@@ -1479,102 +1484,99 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           });
         });
       } else {
-        // --- MODO GRUPAL: Contraparte común al centro, sujetos a izquierda, otras contrapartes a derecha ---
-        const commonCuit = activeCommonCounterparts[0] || "COMUN";
-        const commonName = denoms[commonCuit] || "Contraparte Central";
+        // --- MODO GRUPAL: 3 filas — fuentes arriba, analizados al centro, destinos abajo ---
+        const topY = marginY;
+        const centerY = vbHeight / 2;
+        const bottomY = vbHeight - marginY;
 
-        const leftX = vbWidth * 0.18;
-        const centerX = vbWidth * 0.5;
-        const rightX = vbWidth * 0.85;
-
-        // Si hay contrapartes comunes las ponemos al centro, sino omitimos ese nodo central
-        if (commonCuit && commonCuit !== "COMUN") {
-          nodes.push({
-            id: commonCuit,
-            cuit: commonCuit,
-            denom: commonName,
-            isCentral: true,
-            isCommon: true,
-            color: "#3b82f6",
-            fill: "#dbeafe",
-            r: 28,
-            x: centerX,
-            y: vbHeight / 2
-          });
-        }
-
-        // Sujetos del grupo: columna izquierda si hay pocos, grilla centrada si hay muchos
-        const subjectsOnly = activeSubjects.filter(s => s !== commonCuit);
+        // 1. Sujetos analizados en la fila central
+        const subjectsOnly = activeSubjects.filter(s => !commonSet.has(s));
         const subCount = subjectsOnly.length;
+        const analXMax = activeCommonCounterparts.length > 0 ? vbWidth * 0.68 : vbWidth - 80;
 
-        if (subCount <= 4) {
-          // Columna izquierda
-          subjectsOnly.forEach((sub, idx) => {
-            const y = subCount > 1
-              ? marginY + (idx * (vbHeight - marginY * 2)) / (subCount - 1)
-              : vbHeight / 2;
-            nodes.push({
-              id: sub, cuit: sub, denom: denoms[sub] || sub,
-              isCentral: false, isSubject: true,
-              color: "#ef4444", fill: "#fee2e2", r: 24,
-              x: leftX, y: y
-            });
-          });
-        } else {
-          // Grilla 2D centrada (misma lógica que NetworkGraph.tsx para redes grandes)
-          const cols = Math.ceil(Math.sqrt(subCount));
-          const cellW = vbWidth * 0.55 / (cols + 1);
-          const cellH = (vbHeight - marginY * 2) / Math.max(Math.ceil(subCount / cols), 1);
-          const startX = vbWidth * 0.15;
-          const r = Math.max(10, Math.min(18, 120 / subCount)); // radio adaptativo
-
-          subjectsOnly.forEach((sub, idx) => {
-            const col = idx % cols;
-            const row = Math.floor(idx / cols);
-            nodes.push({
-              id: sub, cuit: sub, denom: denoms[sub] || sub,
-              isCentral: false, isSubject: true,
-              color: "#ef4444", fill: "#fee2e2", r: r,
-              x: startX + col * cellW,
-              y: marginY + row * cellH + cellH / 2
-            });
-          });
-        }
-
-        // Otras contrapartes relacionadas (ej. segundo nivel, como una contraparte del nodo común) a la derecha
-        const placedSoFar = new Set(nodes.map(n => n.id));
-        const otherCounterparts = filteredNodes.filter(n => !placedSoFar.has(n.id));
-        const otherSlice = byVolDesc(otherCounterparts).slice(0, 6);
-        otherSlice.forEach((node, idx) => {
-          const y = otherSlice.length > 1
-            ? marginY + (idx * (vbHeight - marginY * 2)) / (otherSlice.length - 1)
-            : vbHeight / 2;
+        subjectsOnly.forEach((sub, idx) => {
+          const x = subCount > 1
+            ? 80 + (idx * (analXMax - 80)) / (subCount - 1)
+            : vbWidth * 0.4;
           nodes.push({
-            id: node.id,
-            cuit: node.id,
-            denom: denoms[node.id] || node.label || node.id,
-            isCentral: false,
-            color: "#f97316",
-            fill: "#ffedd5",
-            r: 18,
-            x: rightX,
-            y: y
+            id: sub, cuit: sub, denom: denoms[sub] || sub,
+            isCentral: false, isSubject: true,
+            color: "#ef4444", fill: "#fee2e2",
+            r: Math.max(16, Math.min(28, 200 / Math.max(subCount, 1))),
+            x, y: centerY
           });
         });
 
+        // 2. Contrapartes comunes a la derecha del centro (todas, no solo la primera)
+        const commonList = activeCommonCounterparts.filter(c => c && c !== "COMUN");
+        commonList.forEach((cuit, idx) => {
+          const x = vbWidth * 0.78 + idx * 45;
+          nodes.push({
+            id: cuit, cuit, denom: denoms[cuit] || "Contraparte Común",
+            isCentral: true, isCommon: true,
+            color: "#3b82f6", fill: "#dbeafe",
+            r: 22, x, y: centerY
+          });
+        });
+
+        // 3. Fuentes (envían a sujetos) → fila superior
+        const placedSoFar = new Set(nodes.map(n => n.id));
+        const remaining = filteredNodes.filter(n => !placedSoFar.has(n.id));
+
+        const sources = byVolDesc(remaining.filter(n =>
+          filteredEdges.some(e => e.source === n.id && subjectSet.has(e.target))
+          && !filteredEdges.some(e => e.target === n.id && subjectSet.has(e.source))
+        )).slice(0, 8);
+
+        sources.forEach((node, idx) => {
+          const x = sources.length > 1
+            ? 80 + (idx * (vbWidth - 160)) / (sources.length - 1)
+            : vbWidth / 2;
+          nodes.push({
+            id: node.id, cuit: node.id, denom: denoms[node.id] || node.label || node.id,
+            isCentral: false,
+            color: "#22c55e", fill: "#d1fae5",
+            r: 16, x, y: topY
+          });
+        });
+
+        // 4. Destinos (reciben de sujetos) → fila inferior
+        const placedNow = new Set(nodes.map(n => n.id));
+        const remainingAfter = filteredNodes.filter(n => !placedNow.has(n.id));
+        const targets = byVolDesc(remainingAfter).slice(0, 8);
+
+        targets.forEach((node, idx) => {
+          const x = targets.length > 1
+            ? 80 + (idx * (vbWidth - 160)) / (targets.length - 1)
+            : vbWidth / 2;
+          nodes.push({
+            id: node.id, cuit: node.id, denom: denoms[node.id] || node.label || node.id,
+            isCentral: false,
+            color: "#f97316", fill: "#ffedd5",
+            r: 16, x, y: bottomY
+          });
+        });
+
+        // 5. Edges
         const placedIds = new Set(nodes.map(n => n.id));
         filteredEdges.forEach((e, idx) => {
           if (!placedIds.has(e.source) || !placedIds.has(e.target)) return;
           const isFromSubjectToCommon = subjectSet.has(e.source) && commonSet.has(e.target);
+          const isFromCommonToSubject = commonSet.has(e.source) && subjectSet.has(e.target);
+          const isBetweenSubjects = subjectSet.has(e.source) && subjectSet.has(e.target);
+          let color = "#94a3b8";
+          let markerId = "arrow-local";
+          if (isFromSubjectToCommon || isFromCommonToSubject) { color = "#fb7185"; markerId = "arrow-local"; }
+          else if (isBetweenSubjects) { color = "#a78bfa"; markerId = "arrow-local-snd"; }
+          else if (subjectSet.has(e.target)) { color = "#22c55e"; markerId = "arrow-local-rec"; }
+          else if (subjectSet.has(e.source)) { color = "#f97316"; markerId = "arrow-local-snd"; }
           links.push({
             id: "local-edge-" + idx,
-            source: e.source,
-            target: e.target,
-            color: isFromSubjectToCommon ? "#fb7185" : "#f97316",
-            markerId: isFromSubjectToCommon ? "arrow-local" : "arrow-local-snd",
+            source: e.source, target: e.target,
+            color, markerId,
             sum: e.amount_ars,
             isRec: false,
-            isGrupal: isFromSubjectToCommon,
+            isGrupal: isFromSubjectToCommon || isFromCommonToSubject,
             showLabel: true
           });
         });
@@ -1650,7 +1652,9 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           if (link.showLabel && link.sum) {
             const midX = (sx + tx) / 2;
             const midY = (sy + ty) / 2;
-            const valStr = Math.round(link.sum / 1000) + " k";
+            const valStr = link.sum >= 1_000_000
+            ? (link.sum / 1_000_000).toFixed(1) + "M"
+            : Math.round(link.sum / 1000) + "k";
 
             const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
             g.setAttribute("transform", "translate(" + midX + "," + midY + ")");
