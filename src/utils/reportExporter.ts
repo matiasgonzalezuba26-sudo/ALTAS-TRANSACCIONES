@@ -775,7 +775,8 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
 
       switchReportTab(localActiveTab);
       setLocalForensicMode(localForensicMode);
-      updateForensicsView();
+      // Defer: el SVG puede estar hidden en DOMContentLoaded — esperamos un tick
+      setTimeout(function() { updateForensicsView(); }, 0);
 
       // 1. Filtrado Interactivo de Sujetos Alertados (Pestaña 1)
       const subjectSearchInput = document.getElementById("subject-search-input");
@@ -961,7 +962,8 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         tabAlertasBtn.className = "px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-transparent text-zinc-400 hover:text-white focus:outline-none transition-colors duration-150";
         contentForense.classList.remove('hidden');
         contentAlertas.classList.add('hidden');
-        updateForensicsView();
+        // Defer: asegura que el SVG tiene dimensiones reales antes de renderizar
+        setTimeout(function() { updateForensicsView(); }, 50);
       }
     }
 
