@@ -1366,6 +1366,7 @@ export default function App() {
         groupId: groupFallback.id,
         subjects,
         commonCounterparts: groupFallback.commonCounterparts,
+        pairwiseCommon: (groupFallback as any).pairwiseCommon || [],
         totalIntergroupVolume: totalVol,
         detectedLoopsCount: subjects.length > 2 ? 1 : 0,
         receives: Object.values(recibeMap).sort((a, b) => b.sum - a.sum),
