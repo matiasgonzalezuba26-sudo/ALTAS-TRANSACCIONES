@@ -2757,6 +2757,15 @@ export default function App() {
                         // Nodos en común ENTRE TODOS (intersección del grupo completo)
                         const allGroupCommon = activeGroup.commonCounterparts;
 
+                        // Total de nodos en común: unión de pairwiseCommon + commonCounterparts del grupo
+                        // DEBE ir primero — lo usan commonSet, buildCPLine y totalNodosComunes
+                        const uniqueCommonInPairs = new Set([
+                          ...pairwiseCommon.flatMap((p: any) => p.counterparts),
+                          ...allGroupCommon
+                        ]);
+                        const totalNodosComunes = uniqueCommonInPairs.size;
+                        const commonSet = new Set(uniqueCommonInPairs);
+
                         // ORDENANTES = top de FONDOS ENTRANTES (recibeList)
                         // RECEPTORAS = top de EGRESOS (ordenaList)
                         const buildCPLine = (items: {cuit: string; denom: string; sum: number}[], total: number) => {
@@ -2775,29 +2784,19 @@ export default function App() {
                           return mainTxt + restTxt;
                         };
 
-                        // Filtrar recibeList y ordenaList a solo las contrapartes que son nodos comunes
-                        const commonSet = new Set(uniqueCommonInPairs);
-
-                        const commonOrdenantes = recibeList.filter(x => commonSet.has(x.cuit));
-                        const commonOrdenanteTotal = commonOrdenantes.reduce((s, x) => s + x.sum, 0);
+                        const commonOrdenantes = recibeList.filter((x: any) => commonSet.has(x.cuit));
+                        const commonOrdenanteTotal = commonOrdenantes.reduce((s: number, x: any) => s + x.sum, 0);
                         const ordenaLine = commonOrdenantes.length > 0
                           ? buildCPLine(commonOrdenantes, commonOrdenanteTotal)
                           : null;
 
-                        const commonReceptoras = ordenaList.filter(x => commonSet.has(x.cuit));
-                        const commonReceptoraTotal = commonReceptoras.reduce((s, x) => s + x.sum, 0);
+                        const commonReceptoras = ordenaList.filter((x: any) => commonSet.has(x.cuit));
+                        const commonReceptoraTotal = commonReceptoras.reduce((s: number, x: any) => s + x.sum, 0);
                         const recibeLine = commonReceptoras.length > 0
                           ? buildCPLine(commonReceptoras, commonReceptoraTotal)
                           : null;
 
-                        const allCPsFull = allGroupCommon.map(c => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
-
-                        // Total de nodos en común: unión de pairwiseCommon + commonCounterparts del grupo
-                        const uniqueCommonInPairs = new Set([
-                          ...pairwiseCommon.flatMap(p => p.counterparts),
-                          ...allGroupCommon
-                        ]);
-                        const totalNodosComunes = uniqueCommonInPairs.size;
+                        const allCPsFull = allGroupCommon.map((c: string) => `${cuitDenominacionesMap[c] || getArgentineFallbackName(c, "Contraparte")} (CUIT ${c})`);
 
                         return (
                           <div className="flex flex-col gap-4">
