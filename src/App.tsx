@@ -2442,8 +2442,6 @@ export default function App() {
                           <>
                             Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                             mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                            El análisis transaccional del período evaluado <strong>no evidencia contrapartes compartidas</strong> entre los sujetos del grupo,
-                            aunque la vinculación entre ellos puede responder a otros elementos no reflejados en los flujos analizados.
                           </>
                         );
                       }
@@ -2454,8 +2452,6 @@ export default function App() {
                           <>
                             Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                             mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                            Se detectaron <strong>{total} contraparte{total !== 1 ? "s" : ""} compartida{total !== 1 ? "s" : ""}</strong> entre los {nSujetos} sujetos analizados,
-                            {total === 1 ? " presente" : " todas presentes"} en la totalidad del grupo — conexión múltiple y directa.
                           </>
                         );
                       }
@@ -2466,10 +2462,6 @@ export default function App() {
                           <>
                             Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                             mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                            {universales === 1
-                              ? <> Se identifica <strong>1 contraparte común a la totalidad de los {nSujetos} sujetos analizados</strong>, operando como nodo central de la red.</>
-                              : <> Se identifican <strong>{universales} contrapartes comunes a la totalidad de los {nSujetos} sujetos analizados</strong>, operando como nodos centrales de la red.</>
-                            }
                           </>
                         );
                       }
@@ -2481,9 +2473,6 @@ export default function App() {
                           <>
                             Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                             mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                            Se detectaron <strong>{total} contrapartes compartidas</strong> distribuidas entre distintos pares del grupo.{" "}
-                            <strong>{universales} {universales === 1 ? "contraparte es común" : "contrapartes son comunes"} a la totalidad de los {nSujetos} sujetos</strong>,
-                            y <strong>{adicionales} contraparte{adicionales !== 1 ? "s" : ""} adicional{adicionales !== 1 ? "es" : ""}</strong> {adicionales !== 1 ? "alcanzan" : "alcanza"} a más de un sujeto del grupo.
                           </>
                         );
                       }
@@ -2493,8 +2482,6 @@ export default function App() {
                         <>
                           Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                           mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                          Se detectaron <strong>{total} contrapartes compartidas</strong> en {nDuplas} par{nDuplas !== 1 ? "es" : ""} de sujetos del grupo.
-                          Ninguna contraparte es común a la totalidad del grupo, aunque <strong>{uniqueInPairs.size}</strong> de ellas vincula a más de un sujeto analizado.
                         </>
                       );
                     })()}
@@ -2869,86 +2856,7 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* NODOS EN COMÚN POR PARES DE SOs */}
-                            {pairwiseCommon.length > 0 && (
-                              <div>
-                                <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
-                                  Nodos en Común entre Pares de Sujetos Obligados
-                                </span>
-                                <div className="flex flex-col gap-1.5">
-                                  {pairwiseCommon.map((pair, idx) => {
-                                    const nameA = cuitDenominacionesMap[pair.subA] || getArgentineFallbackName(pair.subA, "Sujeto");
-                                    const nameB = cuitDenominacionesMap[pair.subB] || getArgentineFallbackName(pair.subB, "Sujeto");
-                                    const topCPs = pair.counterparts.slice(0, 3);
-                                    const restCount = pair.counterparts.length - topCPs.length;
-                                    return (
-                                      <div key={idx} className="bg-zinc-900 border border-zinc-800 rounded p-2.5">
-                                        <div className="flex items-center gap-1.5 mb-1.5">
-                                          <span className="text-[9px] font-extrabold text-blue-400 uppercase tracking-wider">
-                                            SO {subjects.indexOf(pair.subA) + 1} ∩ SO {subjects.indexOf(pair.subB) + 1}
-                                          </span>
-                                          <span className="text-[9px] text-zinc-500">·</span>
-                                          <span className="text-[9px] font-bold text-zinc-400">{pair.counterparts.length} nodo{pair.counterparts.length !== 1 ? "s" : ""} compartido{pair.counterparts.length !== 1 ? "s" : ""}</span>
-                                        </div>
-                                        <div className="text-[9px] text-zinc-500 mb-1 truncate" title={`${nameA} / ${nameB}`}>
-                                          <span className="text-zinc-300 font-medium">{nameA.split(" ").slice(0, 2).join(" ")}</span>
-                                          <span className="text-zinc-600 mx-1">↔</span>
-                                          <span className="text-zinc-300 font-medium">{nameB.split(" ").slice(0, 2).join(" ")}</span>
-                                        </div>
-                                        <div className="flex flex-wrap gap-1 mt-1">
-                                          {topCPs.map(cp => (
-                                            <span key={cp} className="text-[8px] font-mono bg-blue-950/60 text-blue-300 border border-blue-900/50 px-1.5 py-0.5 rounded" title={cuitDenominacionesMap[cp] || cp}>
-                                              {(cuitDenominacionesMap[cp] || cp).split(" ").slice(0, 2).join(" ")}
-                                            </span>
-                                          ))}
-                                          {restCount > 0 && (
-                                            <span className="text-[8px] font-bold text-zinc-500 px-1 py-0.5">+{restCount} más</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* NODOS EN COMÚN DEL GRUPO COMPLETO */}
-                            {allGroupCommon.length > 0 && (
-                              <div>
-                                <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
-                                  Nodos en Común — Grupo Completo ({subjects.length} SOs)
-                                </span>
-                                <div className="bg-zinc-900 border border-blue-900/50 rounded p-2.5">
-                                  <div className="flex items-center gap-1.5 mb-2">
-                                    <span className="text-[9px] font-extrabold text-blue-400 uppercase tracking-wider">
-                                      ∩ {subjects.length} Sujetos
-                                    </span>
-                                    <span className="text-[9px] text-zinc-500">·</span>
-                                    <span className="text-[9px] font-bold text-zinc-400">{allGroupCommon.length} contraparte{allGroupCommon.length !== 1 ? "s" : ""} compartida{allGroupCommon.length !== 1 ? "s" : ""} por todos</span>
-                                  </div>
-                                  <div className="flex flex-wrap gap-1">
-                                    {allGroupCommon.slice(0, TOP_CP).map(cp => (
-                                      <span key={cp} className="text-[8px] font-mono bg-blue-900/40 text-blue-200 border border-blue-800/50 px-1.5 py-0.5 rounded" title={`CUIT ${cp}`}>
-                                        {(cuitDenominacionesMap[cp] || getArgentineFallbackName(cp, "Contraparte")).split(" ").slice(0, 3).join(" ")}
-                                      </span>
-                                    ))}
-                                    {allGroupCommon.length > TOP_CP && (
-                                      <details className="w-full mt-1">
-                                        <summary className="cursor-pointer text-[9px] text-blue-400 font-bold select-none hover:text-blue-300">
-                                          Ver todas ({allGroupCommon.length})
-                                        </summary>
-                                        <ul className="mt-1 space-y-0.5 text-[9px] text-blue-300 list-disc list-inside">
-                                          {allGroupCommon.map((cp, i) => (
-                                            <li key={i}>{cuitDenominacionesMap[cp] || getArgentineFallbackName(cp, "Contraparte")} — CUIT {cp}</li>
-                                          ))}
-                                        </ul>
-                                      </details>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
+                            
                             {/* Alerta grupal */}
                             <div className="mt-1">
                               <span className="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest mb-1.5">
