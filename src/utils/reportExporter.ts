@@ -38,6 +38,7 @@ export interface GroupSnapshot {
   groupId: string;
   subjects: string[];
   commonCounterparts: string[];
+  pairwiseCommon: { subA: string; subB: string; counterparts: string[] }[];
   totalIntergroupVolume: number;
   detectedLoopsCount: number;
   receives: FlowEntry[];           // inyecciones externas al grupo
@@ -1182,19 +1183,32 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         document.getElementById("label-destinos-title").innerText = "LIQUIDACIONES EXTERNAS DE RED";
 
         const hasCommonCounterparts = gs.commonCounterparts.length > 0;
-        const subjectsList = gs.subjects.map(c => (denoms[c] || getArgentineFallbackName(c, "Sujeto")) + " (CUIT " + c + ")");
-        const subjectsDetail = joinSpanish(subjectsList);
-        let presentationText = "";
-        if (hasCommonCounterparts) {
-          const cpList = gs.commonCounterparts.map(c => (denoms[c] || getArgentineFallbackName(c, "Contraparte")) + " (CUIT " + c + ")");
-          const cpDetail = joinSpanish(cpList);
-          presentationText = gs.commonCounterparts.length === 1
-            ? "presentando en com&uacute;n la siguiente contraparte: " + cpDetail
-            : "presentando en com&uacute;n las siguientes contrapartes: " + cpDetail;
+        // Narrativa dinámica variantes A-E usando pairwiseCommon del snapshot
+        const gPairwise = gs.pairwiseCommon || [];
+        const gUniquePairs = new Set(gPairwise.flatMap(function(p) { return p.counterparts; }));
+        const gUniversales = gs.commonCounterparts || [];
+        const gTotalComunes = new Set([...gUniquePairs, ...gUniversales]).size;
+        const gNSujetos = gs.subjects.length;
+        const gNDuplas = gPairwise.length;
+
+        let groupMatchReason = "";
+        if (gTotalComunes === 0) {
+          groupMatchReason = "El an&aacute;lisis transaccional del per&iacute;odo evaluado no evidencia contrapartes compartidas entre los sujetos del grupo.";
+        } else if (gUniversales.length > 0 && gTotalComunes === gUniversales.length) {
+          const cpNames = gUniversales.map(function(c) { return (denoms[c] || getArgentineFallbackName(c, "Contraparte")) + " (CUIT " + c + ")"; });
+          groupMatchReason = gUniversales.length === 1
+            ? "Se identifica <strong>" + joinSpanish(cpNames) + "</strong> como contraparte com&uacute;n a la totalidad de los <strong>" + gNSujetos + " sujetos analizados</strong>, operando como nodo central de la red."
+            : "Se identifican <strong>" + gUniversales.length + " contrapartes</strong> comunes a la totalidad de los <strong>" + gNSujetos + " sujetos</strong>: " + joinSpanish(cpNames) + ".";
+        } else if (gUniversales.length > 0) {
+          const adicionales = gTotalComunes - gUniversales.length;
+          const cpNames = gUniversales.map(function(c) { return (denoms[c] || getArgentineFallbackName(c, "Contraparte")) + " (CUIT " + c + ")"; });
+          groupMatchReason = "Se detectaron <strong>" + gTotalComunes + " contrapartes compartidas</strong>. "
+            + (gUniversales.length === 1 ? "1 contraparte es com&uacute;n" : gUniversales.length + " contrapartes son comunes")
+            + " a la totalidad de los " + gNSujetos + " sujetos: " + joinSpanish(cpNames)
+            + (adicionales > 0 ? "; y " + adicionales + " contraparte" + (adicionales !== 1 ? "s" : "") + " adicional" + (adicionales !== 1 ? "es" : "") + " vincula" + (adicionales === 1 ? "" : "n") + " a m&aacute;s de un sujeto del grupo." : ".");
         } else {
-          presentationText = "presentando operaciones entre s&iacute;";
+          groupMatchReason = "Se observa convergencia de flujos entre los <strong>" + gNSujetos + " sujetos analizados</strong>, con <strong>" + gTotalComunes + " contraparte" + (gTotalComunes !== 1 ? "s" : "") + " compartida" + (gTotalComunes !== 1 ? "s" : "") + "</strong> identificadas en " + gNDuplas + " par" + (gNDuplas !== 1 ? "es" : "") + " del grupo.";
         }
-        const groupMatchReason = "Se observan convergencia de flujos entre los sujetos analizados: " + subjectsDetail + ", " + presentationText + ".";
 
         let subjectsRowsHtml = "";
         gs.subjects.forEach(cuit => {
