@@ -275,14 +275,14 @@ export default function NetworkGraph({
       if (node.risk_level === "MEDIO") return { fill: "#fee2e2", stroke: "#f59e0b" };
       return { fill: "#fee2e2", stroke: "#ef4444" };
     }
-    // Nodos grupo sintéticos
+    // Nodos grupo sintéticos — siempre usar groupCategory para el color
     if ((node as any).isGroupNode) {
-      if (isGroupMode) return { fill: "#dbeafe", stroke: "#3b82f6" };
       const cat = (node as any).groupCategory;
       if (cat === "ENVIA") return { fill: "#d1fae5", stroke: "#22c55e" };
       if (cat === "RECIBE") return { fill: "#ffedd5", stroke: "#f97316" };
       if (cat === "AMBOS") return { fill: "#fef9c3", stroke: "#ea580c" };
-      return { fill: "#f1f5f9", stroke: "#94a3b8" };
+      // fallback: verde (fuente de fondos)
+      return { fill: "#d1fae5", stroke: "#22c55e" };
     }
     // En modo grupal: contrapartes son azul por defecto (comunes a la red)
     // Solo se usa verde/naranja si opera EXCLUSIVAMENTE con UN solo sujeto analizado
