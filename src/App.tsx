@@ -2433,7 +2433,9 @@ export default function App() {
                       const total = totalUnique.size;
                       const nSujetos = activeGroup?.subjects?.length || 0;
                       const nDuplas = pairwise.length;
+                      const universales = allGroupCommon.length;
 
+                      // Variante E: sin evidencia transaccional de conexión
                       if (total === 0) {
                         return (
                           <>
@@ -2445,31 +2447,53 @@ export default function App() {
                         );
                       }
 
-                      if (total === 1) {
+                      // Variante D: red pequeña, todas comunes a todos
+                      if (nSujetos <= 6 && universales === total) {
                         return (
                           <>
                             Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                             mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                            Se identifica <strong>1 contraparte compartida</strong> que opera como punto de conexión entre sujetos del grupo
-                            {nDuplas > 0 ? `, presente en ${nDuplas} par${nDuplas !== 1 ? "es" : ""} de sujetos analizados` : ""}.
+                            Se detectaron <strong>{total} contraparte{total !== 1 ? "s" : ""} compartida{total !== 1 ? "s" : ""}</strong> entre los {nSujetos} sujetos analizados,
+                            {total === 1 ? " presente" : " todas presentes"} en la totalidad del grupo — conexión múltiple y directa.
                           </>
                         );
                       }
 
-                      const universales = allGroupCommon.length;
+                      // Variante A/B con nodo(s) universal(es) sin adicionales
+                      if (universales > 0 && total === universales) {
+                        return (
+                          <>
+                            Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
+                            mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
+                            {universales === 1
+                              ? <> Se identifica <strong>1 contraparte común a la totalidad de los {nSujetos} sujetos analizados</strong>, operando como nodo central de la red.</>
+                              : <> Se identifican <strong>{universales} contrapartes comunes a la totalidad de los {nSujetos} sujetos analizados</strong>, operando como nodos centrales de la red.</>
+                            }
+                          </>
+                        );
+                      }
 
+                      // Variante C: hay nodo(s) universal(es) + contrapartes adicionales
+                      if (universales > 0 && total > universales) {
+                        const adicionales = total - universales;
+                        return (
+                          <>
+                            Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
+                            mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
+                            Se detectaron <strong>{total} contrapartes compartidas</strong> distribuidas entre distintos pares del grupo.{" "}
+                            <strong>{universales} {universales === 1 ? "contraparte es común" : "contrapartes son comunes"} a la totalidad de los {nSujetos} sujetos</strong>,
+                            y <strong>{adicionales} contraparte{adicionales !== 1 ? "s" : ""} adicional{adicionales !== 1 ? "es" : ""}</strong> {adicionales !== 1 ? "alcanzan" : "alcanza"} a más de un sujeto del grupo.
+                          </>
+                        );
+                      }
+
+                      // Variante B: sin nodo universal, varios de alto alcance
                       return (
                         <>
                           Este panel fusiona la totalidad de los flujos de fondos correspondientes a los <strong>{nSujetos} sujetos analizados</strong> del grupo,
                           mostrando los fondos que ingresan (orígenes en la columna izquierda) y los fondos egresados (destinos en la columna derecha) de toda la red.
-                          Se detectaron <strong>{total} contrapartes compartidas</strong> distribuidas entre distintos pares del grupo
-                          {nDuplas > 0 ? `, identificadas en ${nDuplas} combinación${nDuplas !== 1 ? "es" : ""} de sujetos` : ""}.
-                          {universales > 0 && (
-                            <> De estas, <strong>{universales} {universales === 1 ? "contraparte es común" : "contrapartes son comunes"} a la totalidad del grupo</strong>.</>
-                          )}
-                          {universales === 0 && uniqueInPairs.size > 0 && (
-                            <> Ninguna contraparte es común a la totalidad del grupo, aunque <strong>{uniqueInPairs.size}</strong> de ellas vincula a más de un sujeto analizado.</>
-                          )}
+                          Se detectaron <strong>{total} contrapartes compartidas</strong> en {nDuplas} par{nDuplas !== 1 ? "es" : ""} de sujetos del grupo.
+                          Ninguna contraparte es común a la totalidad del grupo, aunque <strong>{uniqueInPairs.size}</strong> de ellas vincula a más de un sujeto analizado.
                         </>
                       );
                     })()}
