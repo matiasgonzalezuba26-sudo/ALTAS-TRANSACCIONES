@@ -2959,22 +2959,29 @@ export default function App() {
                                   <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
                                   <div className="flex-1 space-y-1.5">
                                     <strong className="text-red-300 block uppercase text-[9px] tracking-wider font-extrabold">ALERTA GRUPAL CRÍTICA DETECTADA</strong>
-                                    <p>Se observa convergencia de flujos entre los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>
-                                    {totalNodosComunes > 0 && (
-                                      <>, con <strong className="text-red-100">{totalNodosComunes} contraparte{totalNodosComunes !== 1 ? "s" : ""} compartida{totalNodosComunes !== 1 ? "s" : ""}</strong> identificada{totalNodosComunes !== 1 ? "s" : ""} entre pares del grupo</>
-                                    )}.</p>
-                                    {ordenaLine && (
-                                      <p><span className="text-red-300 font-bold">Como ordenantes comunes:</span> {ordenaLine}.</p>
-                                    )}
-                                    {recibeLine && (
-                                      <p><span className="text-red-300 font-bold">Como receptoras comunes:</span> {recibeLine}.</p>
-                                    )}
-                                    {!ordenaLine && !recibeLine && hasCommonCounterparts && (
-                                      <p>Las contrapartes compartidas no se distinguen por dirección de flujo predominante.</p>
-                                    )}
-                                    {!hasCommonCounterparts && (
-                                      <p>Presentan operaciones directas entre sí.</p>
-                                    )}
+                                    {(() => {
+                                      // Nodo(s) universal(es): común a TODOS los sujetos
+                                      if (allGroupCommon.length > 0) {
+                                        const cpNames = allCPsFull.join(", ");
+                                        return (
+                                          <p>
+                                            Se identifica <strong className="text-red-100">{allGroupCommon.length === 1 ? "1 contraparte común" : `${allGroupCommon.length} contrapartes comunes`}</strong> a la totalidad de los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>: {cpNames}.
+                                          </p>
+                                        );
+                                      }
+                                      // Sin nodo universal pero con nodos en pares
+                                      if (totalNodosComunes > 0) {
+                                        return (
+                                          <p>
+                                            Se observa convergencia de flujos entre los <strong className="text-red-100">{subjects.length} sujetos analizados</strong>, con <strong className="text-red-100">{totalNodosComunes} contraparte{totalNodosComunes !== 1 ? "s" : ""} compartida{totalNodosComunes !== 1 ? "s" : ""}</strong> identificadas entre pares del grupo.
+                                          </p>
+                                        );
+                                      }
+                                      // Sin contrapartes compartidas
+                                      return (
+                                        <p>Presentan operaciones directas entre sí sin contrapartes externas compartidas detectadas.</p>
+                                      );
+                                    })()}
                                     {allCPsFull.length > TOP_CP && (
                                       <details className="mt-1">
                                         <summary className="cursor-pointer text-[10px] text-red-400 font-bold select-none hover:text-red-300">
