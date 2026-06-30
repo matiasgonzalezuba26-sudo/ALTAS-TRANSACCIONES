@@ -773,10 +773,17 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         if (groupSelect) groupSelect.value = selectedGroupId;
       }
 
-      switchReportTab(localActiveTab);
+      // Pre-renderizar la pestaña forense ANTES de activar la tab inicial.
+      // Si activeTab='alertas', el SVG estaría hidden (0x0) al renderizar.
+      // Solución: mostrar temporalmente invisible, renderizar, luego restaurar.
+      var _forensePane = document.getElementById('report-tab-content-forense');
+      var _alertasPane = document.getElementById('report-tab-content-alertas');
+      if (_forensePane) { _forensePane.style.visibility = 'hidden'; _forensePane.classList.remove('hidden'); }
+      if (_alertasPane) { _alertasPane.classList.add('hidden'); }
       setLocalForensicMode(localForensicMode);
-      // Defer: el SVG puede estar hidden en DOMContentLoaded — esperamos un tick
-      setTimeout(function() { updateForensicsView(); }, 0);
+      updateForensicsView();
+      if (_forensePane) { _forensePane.style.visibility = ''; }
+      switchReportTab(localActiveTab);
 
       // 1. Filtrado Interactivo de Sujetos Alertados (Pestaña 1)
       const subjectSearchInput = document.getElementById("subject-search-input");
@@ -962,8 +969,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         tabAlertasBtn.className = "px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 border-transparent text-zinc-400 hover:text-white focus:outline-none transition-colors duration-150";
         contentForense.classList.remove('hidden');
         contentAlertas.classList.add('hidden');
-        // Defer: asegura que el SVG tiene dimensiones reales antes de renderizar
-        setTimeout(function() { updateForensicsView(); }, 50);
+        setTimeout(function() { updateForensicsView(); }, 30);
       }
     }
 
@@ -1374,7 +1380,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
 
       const vbWidth = 760;
       // Altura dinámica: mínimo 380px, crece 55px por sujeto analizado sobre 4
-      const subjectCount = (snapshotNodes || []).filter((n: any) => n.type === "ANALIZADO").length || (activeSubjects || []).length;
+      const subjectCount = (snapshotNodes || []).filter(function(n) { return n.type === "ANALIZADO"; }).length || (activeSubjects || []).length;
       const vbHeight = Math.max(380, 260 + subjectCount * 55);
       const marginY = 50;
       const denoms = reportState.cuitDenominacionesMap || {};
