@@ -1441,43 +1441,47 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         const rightX = vbWidth * 0.85;
         const selectedCuitLocal = activeSubjects[0];
 
-        const maxPerif = 6;
+        const maxPerif = 8;
         const leftSlice = leftNodes.slice(0, maxPerif);
         const rightSlice = rightNodes.slice(0, maxPerif);
+        const leftExtra = leftNodes.length - maxPerif;
+        const rightExtra = rightNodes.length - maxPerif;
+
+        // vbHeight adaptado a la cantidad de nodos laterales
+        var indHeight = Math.max(380, marginY * 2 + Math.max(leftSlice.length, rightSlice.length) * 65);
+        svg.setAttribute("viewBox", "0 0 " + vbWidth + " " + indHeight);
 
         leftSlice.forEach((node, idx) => {
           const y = leftSlice.length > 1
-            ? marginY + (idx * (vbHeight - marginY * 2)) / (leftSlice.length - 1)
-            : vbHeight / 2;
+            ? marginY + (idx * (indHeight - marginY * 2)) / (leftSlice.length - 1)
+            : indHeight / 2;
           nodes.push({
-            id: node.id,
-            cuit: node.id,
-            denom: denoms[node.id] || node.label || node.id,
-            isCentral: false,
-            color: "#22c55e",
-            fill: "#d1fae5",
-            r: 20,
-            x: leftX,
-            y: y
+            id: node.id, cuit: node.id, denom: denoms[node.id] || node.label || node.id,
+            isCentral: false, color: "#22c55e", fill: "#d1fae5", r: 20,
+            x: leftX, y: y
           });
         });
+        if (leftExtra > 0) {
+          nodes.push({ id: "__grp_left__", cuit: "", denom: leftExtra + " más",
+            isCentral: false, isGroup: true, color: "#16a34a", fill: "#dcfce7",
+            r: 18, x: leftX, y: indHeight - marginY + 20 });
+        }
 
         rightSlice.forEach((node, idx) => {
           const y = rightSlice.length > 1
-            ? marginY + (idx * (vbHeight - marginY * 2)) / (rightSlice.length - 1)
-            : vbHeight / 2;
+            ? marginY + (idx * (indHeight - marginY * 2)) / (rightSlice.length - 1)
+            : indHeight / 2;
           nodes.push({
-            id: node.id,
-            cuit: node.id,
-            denom: denoms[node.id] || node.label || node.id,
-            isCentral: false,
-            color: "#f97316",
-            fill: "#ffedd5",
-            r: 20,
-            x: rightX,
-            y: y
+            id: node.id, cuit: node.id, denom: denoms[node.id] || node.label || node.id,
+            isCentral: false, color: "#f97316", fill: "#ffedd5", r: 20,
+            x: rightX, y: y
           });
         });
+        if (rightExtra > 0) {
+          nodes.push({ id: "__grp_right__", cuit: "", denom: rightExtra + " más",
+            isCentral: false, isGroup: true, color: "#ea580c", fill: "#ffedd5",
+            r: 18, x: rightX, y: indHeight - marginY + 20 });
+        }
 
         // Sujeto analizado en el centro
         nodes.push({
@@ -1516,101 +1520,126 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
           });
         });
       } else {
-        // --- MODO GRUPAL: 3 filas — fuentes arriba, analizados al centro, destinos abajo ---
-        const topY = marginY;
-        const centerY = vbHeight / 2;
-        const bottomY = vbHeight - marginY;
+        // --- MODO GRUPAL: replica el layout de NetworkGraph.tsx ---
+        // Constantes de agrupación (igual que la app)
+        var CP_LIMIT = 9;   // máximo nodos visibles por fila
+        var CP_TOP = 6;     // cuántos mostrar antes de agrupar
 
-        // 1. Sujetos analizados en la fila central
-        const subjectsOnly = activeSubjects.filter(s => !commonSet.has(s));
-        const subCount = subjectsOnly.length;
-        const analXMax = activeCommonCounterparts.length > 0 ? vbWidth * 0.68 : vbWidth - 80;
+        // Clasificar nodos
+        var analNodes = filteredNodes.filter(function(n) { return subjectSet.has(n.id); });
+        var commonList = filteredNodes.filter(function(n) { return commonSet.has(n.id); });
+        var cpNodes = filteredNodes.filter(function(n) { return !subjectSet.has(n.id) && !commonSet.has(n.id); });
 
-        subjectsOnly.forEach((sub, idx) => {
-          const x = subCount > 1
-            ? 80 + (idx * (analXMax - 80)) / (subCount - 1)
-            : vbWidth * 0.4;
-          nodes.push({
-            id: sub, cuit: sub, denom: denoms[sub] || sub,
-            isCentral: false, isSubject: true,
-            color: "#ef4444", fill: "#fee2e2",
-            r: Math.max(16, Math.min(28, 200 / Math.max(subCount, 1))),
-            x, y: centerY
-          });
+        // Clasificar contrapartes por dirección de flujo
+        var cpSources = cpNodes.filter(function(n) {
+          return filteredEdges.some(function(e) { return e.source === n.id && subjectSet.has(e.target); })
+              && !filteredEdges.some(function(e) { return e.target === n.id && subjectSet.has(e.source); });
+        });
+        var cpTargets = cpNodes.filter(function(n) { return !cpSources.find(function(s) { return s.id === n.id; }); });
+
+        cpSources = byVolDesc(cpSources);
+        cpTargets = byVolDesc(cpTargets);
+
+        // Aplicar límite igual que NetworkGraph — mostrar top CP_TOP, agrupar el resto
+        var visSrc = cpSources.length > CP_LIMIT ? cpSources.slice(0, CP_TOP) : cpSources;
+        var srcGroupCount = cpSources.length > CP_LIMIT ? cpSources.length - CP_TOP : 0;
+        var visTgt = cpTargets.length > CP_LIMIT ? cpTargets.slice(0, CP_TOP) : cpTargets;
+        var tgtGroupCount = cpTargets.length > CP_LIMIT ? cpTargets.length - CP_TOP : 0;
+
+        // vbHeight dinámico basado en filas reales
+        var srcRows = Math.ceil(visSrc.length / 8);
+        var tgtRows = Math.ceil(visTgt.length / 8);
+        var dynHeight = Math.max(520,
+          80 +                           // margin top
+          srcRows * 90 +                 // fuentes
+          Math.max(60, analNodes.length > 6 ? 100 : 80) + // sujetos centro
+          tgtRows * 90 +                 // destinos
+          80                             // margin bottom
+        );
+        svg.setAttribute("viewBox", "0 0 " + vbWidth + " " + dynHeight);
+
+        var mX = 60;
+        var mY = 60;
+        var analR = Math.max(14, Math.min(26, 180 / Math.max(analNodes.length, 1)));
+
+        // Zona central Y para los sujetos
+        var srcZoneH = srcRows * 90;
+        var tgtZoneH = tgtRows * 90;
+        var centerY2 = mY + srcZoneH + 40;
+        var topStart = mY;
+        var bottomStart = centerY2 + analR * 2 + 40;
+
+        // ── 1. Sujetos analizados — fila centro ──────────────────────────────
+        var analXMax = commonList.length > 0 ? vbWidth * 0.72 : vbWidth - mX;
+        analNodes.forEach(function(n, i) {
+          var cnt = analNodes.length;
+          var x = cnt > 1 ? mX + (i * (analXMax - mX * 1.5)) / (cnt - 1) : vbWidth * 0.45;
+          nodes.push({ id: n.id, cuit: n.id, denom: denoms[n.id] || n.label || n.id,
+            isCentral: false, isSubject: true, color: "#ef4444", fill: "#fee2e2",
+            r: analR, x: x, y: centerY2 });
         });
 
-        // 2. Contrapartes comunes a la derecha del centro (todas, no solo la primera)
-        const commonList = activeCommonCounterparts.filter(c => c && c !== "COMUN");
-        commonList.forEach((cuit, idx) => {
-          const x = vbWidth * 0.78 + idx * 45;
-          nodes.push({
-            id: cuit, cuit, denom: denoms[cuit] || "Contraparte Común",
-            isCentral: true, isCommon: true,
-            color: "#3b82f6", fill: "#dbeafe",
-            r: 22, x, y: centerY
-          });
+        // ── 2. Contrapartes comunes — derecha del centro ──────────────────────
+        commonList.forEach(function(n, i) {
+          nodes.push({ id: n.id, cuit: n.id, denom: denoms[n.id] || "Contraparte Común",
+            isCentral: true, isCommon: true, color: "#3b82f6", fill: "#dbeafe",
+            r: 20, x: vbWidth * 0.82 + i * 40, y: centerY2 });
         });
 
-        // 3. Fuentes (envían a sujetos) → fila superior
-        const placedSoFar = new Set(nodes.map(n => n.id));
-        const remaining = filteredNodes.filter(n => !placedSoFar.has(n.id));
-
-        const sources = byVolDesc(remaining.filter(n =>
-          filteredEdges.some(e => e.source === n.id && subjectSet.has(e.target))
-          && !filteredEdges.some(e => e.target === n.id && subjectSet.has(e.source))
-        )).slice(0, 8);
-
-        sources.forEach((node, idx) => {
-          const x = sources.length > 1
-            ? 80 + (idx * (vbWidth - 160)) / (sources.length - 1)
-            : vbWidth / 2;
-          nodes.push({
-            id: node.id, cuit: node.id, denom: denoms[node.id] || node.label || node.id,
-            isCentral: false,
-            color: "#22c55e", fill: "#d1fae5",
-            r: 16, x, y: topY
-          });
+        // ── 3. Fuentes — zona superior ────────────────────────────────────────
+        visSrc.forEach(function(n, i) {
+          var perRow = Math.min(visSrc.length, 8);
+          var row = Math.floor(i / perRow);
+          var col = i % perRow;
+          var colCount = Math.min(visSrc.length - row * perRow, perRow);
+          var x = colCount > 1 ? mX + (col * (vbWidth - mX * 2)) / (colCount - 1) : vbWidth / 2;
+          var y = topStart + row * 90;
+          nodes.push({ id: n.id, cuit: n.id, denom: denoms[n.id] || n.label || n.id,
+            isCentral: false, isSource: true, color: "#22c55e", fill: "#d1fae5",
+            r: 16, x: x, y: y });
         });
+        // Nodo agrupador de fuentes restantes
+        if (srcGroupCount > 0) {
+          nodes.push({ id: "__grp_src__", cuit: "", denom: srcGroupCount + " fuentes más",
+            isCentral: false, isGroup: true, color: "#16a34a", fill: "#dcfce7",
+            r: 20, x: vbWidth - mX, y: topStart });
+        }
 
-        // 4. Destinos (reciben de sujetos) → fila inferior
-        const placedNow = new Set(nodes.map(n => n.id));
-        const remainingAfter = filteredNodes.filter(n => !placedNow.has(n.id));
-        const targets = byVolDesc(remainingAfter).slice(0, 8);
-
-        targets.forEach((node, idx) => {
-          const x = targets.length > 1
-            ? 80 + (idx * (vbWidth - 160)) / (targets.length - 1)
-            : vbWidth / 2;
-          nodes.push({
-            id: node.id, cuit: node.id, denom: denoms[node.id] || node.label || node.id,
-            isCentral: false,
-            color: "#f97316", fill: "#ffedd5",
-            r: 16, x, y: bottomY
-          });
+        // ── 4. Destinos — zona inferior ───────────────────────────────────────
+        visTgt.forEach(function(n, i) {
+          var perRow = Math.min(visTgt.length, 8);
+          var row = Math.floor(i / perRow);
+          var col = i % perRow;
+          var colCount = Math.min(visTgt.length - row * perRow, perRow);
+          var x = colCount > 1 ? mX + (col * (vbWidth - mX * 2)) / (colCount - 1) : vbWidth / 2;
+          var y = bottomStart + row * 90;
+          nodes.push({ id: n.id, cuit: n.id, denom: denoms[n.id] || n.label || n.id,
+            isCentral: false, isTarget: true, color: "#f97316", fill: "#ffedd5",
+            r: 16, x: x, y: y });
         });
+        if (tgtGroupCount > 0) {
+          nodes.push({ id: "__grp_tgt__", cuit: "", denom: tgtGroupCount + " destinos más",
+            isCentral: false, isGroup: true, color: "#ea580c", fill: "#ffedd5",
+            r: 20, x: vbWidth - mX, y: bottomStart });
+        }
 
-        // 5. Edges
-        const placedIds = new Set(nodes.map(n => n.id));
-        filteredEdges.forEach((e, idx) => {
-          if (!placedIds.has(e.source) || !placedIds.has(e.target)) return;
-          const isFromSubjectToCommon = subjectSet.has(e.source) && commonSet.has(e.target);
-          const isFromCommonToSubject = commonSet.has(e.source) && subjectSet.has(e.target);
-          const isBetweenSubjects = subjectSet.has(e.source) && subjectSet.has(e.target);
-          let color = "#94a3b8";
-          let markerId = "arrow-local";
-          if (isFromSubjectToCommon || isFromCommonToSubject) { color = "#fb7185"; markerId = "arrow-local"; }
-          else if (isBetweenSubjects) { color = "#a78bfa"; markerId = "arrow-local-snd"; }
+        // ── 5. Edges ──────────────────────────────────────────────────────────
+        var placedIds2 = new Set(nodes.map(function(n) { return n.id; }));
+        filteredEdges.forEach(function(e, i) {
+          var src2 = placedIds2.has(e.source) ? e.source : (subjectSet.has(e.source) ? null : "__grp_src__");
+          var tgt2 = placedIds2.has(e.target) ? e.target : (subjectSet.has(e.target) ? null : "__grp_tgt__");
+          if (!src2 || !tgt2) return;
+          if (!placedIds2.has(src2) || !placedIds2.has(tgt2)) return;
+          var isSubjCommon = subjectSet.has(e.source) && commonSet.has(e.target);
+          var isCommonSubj = commonSet.has(e.source) && subjectSet.has(e.target);
+          var isBetweenSubj = subjectSet.has(e.source) && subjectSet.has(e.target);
+          var color = "#94a3b8", markerId = "arrow-local";
+          if (isSubjCommon || isCommonSubj) { color = "#fb7185"; }
+          else if (isBetweenSubj) { color = "#a78bfa"; markerId = "arrow-local-snd"; }
           else if (subjectSet.has(e.target)) { color = "#22c55e"; markerId = "arrow-local-rec"; }
           else if (subjectSet.has(e.source)) { color = "#f97316"; markerId = "arrow-local-snd"; }
-          links.push({
-            id: "local-edge-" + idx,
-            source: e.source, target: e.target,
-            color, markerId,
-            sum: e.amount_ars,
-            isRec: false,
-            isGrupal: isFromSubjectToCommon || isFromCommonToSubject,
-            showLabel: true
-          });
+          links.push({ id: "ge-" + i, source: src2, target: tgt2, color: color, markerId: markerId,
+            sum: e.amount_ars, isRec: false, isGrupal: isSubjCommon || isCommonSubj, showLabel: true });
         });
       }
 
