@@ -98,6 +98,7 @@ export interface CapturedAMLState {
   // El reporte HTML usa estos directamente; no recalcula nada.
   individualSnapshots: IndividualSnapshot[];  // uno por cada CUIT en flaggedSubjects
   groupSnapshot: GroupSnapshot | null;         // el grupo activo al momento de exportar
+  allGroupSnapshots: GroupSnapshot[];          // TODOS los grupos detectados
   // ─────────────────────────────────────────────────────────────────────────
 
   // Grafo completo (para búsquedas adicionales desde la pestaña 2 si se necesita)
@@ -294,6 +295,7 @@ export function captureCurrentAMLState(params: {
     positiveCases,
     individualSnapshots: resolvedIndividualSnapshots,
     groupSnapshot: resolvedGroupSnapshot,
+    allGroupSnapshots: params.allGroupSnapshots || (resolvedGroupSnapshot ? [resolvedGroupSnapshot] : []),
     graphNodes: graphNodes || [],
     graphEdges: graphEdges || [],
   };
@@ -750,7 +752,12 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       return snaps.find(s => s.cuit === cuit) || null;
     }
     function getGroupSnapshot() {
-      return reportState.groupSnapshot || null;
+      const allGs = reportState.allGroupSnapshots || [];
+      if (allGs.length === 0) return reportState.groupSnapshot || null;
+      // Buscar el grupo seleccionado en el selector
+      const sel = document.getElementById("local-group-select");
+      const selectedId = sel ? sel.value : (allGs[0] ? allGs[0].groupId : null);
+      return allGs.find(function(g) { return g.groupId === selectedId; }) || allGs[0] || null;
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -764,11 +771,12 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
         if (subjectSelect) subjectSelect.value = selectedCuit;
       }
 
-      // Seleccionar grupo inicial
-      const gs = getGroupSnapshot();
-      if (!selectedGroupId && gs) {
-        selectedGroupId = gs.groupId;
-      } else if (selectedGroupId) {
+      // Seleccionar grupo inicial — usar el primero de allGroupSnapshots
+      const allGs = reportState.allGroupSnapshots || [];
+      if (!selectedGroupId && allGs.length > 0) {
+        selectedGroupId = allGs[0].groupId;
+      }
+      if (selectedGroupId) {
         const groupSelect = document.getElementById("local-group-select");
         if (groupSelect) groupSelect.value = selectedGroupId;
       }
@@ -988,12 +996,14 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
 
       const groupSelect = document.getElementById("local-group-select");
       groupSelect.innerHTML = '';
-      const gs = getGroupSnapshot();
-      if (gs) {
-        const opt = document.createElement("option");
-        opt.value = gs.groupId;
-        opt.text = "Grupo Ref #" + gs.groupId;
-        groupSelect.appendChild(opt);
+      const allGs = reportState.allGroupSnapshots || [];
+      if (allGs.length > 0) {
+        allGs.forEach(function(g, i) {
+          const opt = document.createElement("option");
+          opt.value = g.groupId;
+          opt.text = "Red " + (i + 1) + " | " + g.subjects.length + " sujetos";
+          groupSelect.appendChild(opt);
+        });
       } else {
         const opt = document.createElement("option");
         opt.value = "";
