@@ -1253,7 +1253,7 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
             <div class="flex flex-col gap-4">
               <div>
                 <span class="text-[9px] uppercase font-bold text-zinc-500 block tracking-widest">Grupo Bajo An&aacute;lisis</span>
-                <span class="font-extrabold text-sm text-blue-400 block mt-0.5">Consorcio \${gs.groupId}</span>
+                <span class="font-extrabold text-sm text-blue-400 block mt-0.5">\${gs.subjects.length <= 3 ? gs.subjects.map(function(c) { return (denoms[c] || c).split(' ')[0]; }).join(' / ') + ' (Red Interconectada)' : 'Red de ' + gs.subjects.length + ' Sujetos Interconectados'}</span>
                 <span class="font-mono text-xs font-semibold text-zinc-400 block mt-0.2">
                   V&iacute;nculo: \${hasCommonCounterparts ? "Contraparte Com&uacute;n" : "Transacci&oacute;n Directa"}
                 </span>
@@ -1428,8 +1428,9 @@ export function generateAMLReportHTML(state: CapturedAMLState): string {
       });
 
       const byVolDesc = (arr) => [...arr].sort((a, b) => (nodeVolumes[b.id] || 0) - (nodeVolumes[a.id] || 0));
-      const leftNodes = byVolDesc(receivers); // entran dinero hacia el sujeto -> a la izquierda
-      const rightNodes = byVolDesc([...senders, ...both]); // egresan o ambos -> a la derecha
+      // senders = envian al sujeto → izquierda verde | receivers = reciben del sujeto → derecha naranja
+      const leftNodes = byVolDesc(senders);
+      const rightNodes = byVolDesc([...receivers, ...both]);
 
       const nodes = [];
       const links = [];
