@@ -1397,6 +1397,51 @@ export default function App() {
       graphEdges: analysisResult?.edges || [],
       individualSnapshots,
       groupSnapshot,
+      allGroupSnapshots: detectedGroupFlows.map(gf => {
+        // Construir snapshot para cada grupo detectado (mismo cálculo que groupSnapshot)
+        const subjects = gf.subjects;
+        const recibeMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+        const ordenaMap: Record<string, { cuit: string; denom: string; sum: number }> = {};
+        const internasMap: Record<string, { senderCuit: string; senderDenom: string; receiverCuit: string; receiverDenom: string; sum: number }> = {};
+        filteredTransactions.forEach((tx: any) => {
+          const amount = parseMonto(tx.MONTO).amount;
+          const sender = tx.TIPO === "RECIBIDA" ? tx.CUIT_CONTRAPARTE : tx.CUIT;
+          const receiver = tx.TIPO === "RECIBIDA" ? tx.CUIT : tx.CUIT_CONTRAPARTE;
+          const isSenderIn = subjects.includes(sender);
+          const isReceiverIn = subjects.includes(receiver);
+          if (isSenderIn && isReceiverIn) {
+            const key = `${sender}_${receiver}`;
+            if (!internasMap[key]) internasMap[key] = { senderCuit: sender, senderDenom: cuitDenominacionesMap[sender] || sender, receiverCuit: receiver, receiverDenom: cuitDenominacionesMap[receiver] || receiver, sum: 0 };
+            internasMap[key].sum += amount;
+          } else if (!isSenderIn && isReceiverIn) {
+            const d = cuitDenominacionesMap[sender] || sender;
+            if (!recibeMap[sender]) recibeMap[sender] = { cuit: sender, denom: d, sum: 0 };
+            recibeMap[sender].sum += amount;
+          } else if (isSenderIn && !isReceiverIn) {
+            const d = cuitDenominacionesMap[receiver] || receiver;
+            if (!ordenaMap[receiver]) ordenaMap[receiver] = { cuit: receiver, denom: d, sum: 0 };
+            ordenaMap[receiver].sum += amount;
+          }
+        });
+        const gEdges = (analysisResult?.edges || []).filter((e: any) => subjects.includes(e.source) || subjects.includes(e.target));
+        const gIds = new Set<string>(subjects);
+        gEdges.forEach((e: any) => { gIds.add(e.source); gIds.add(e.target); });
+        const gNodes = (analysisResult?.nodes || []).filter((n: any) => gIds.has(n.id));
+        const totalVol = Object.values(recibeMap).reduce((s, v) => s + v.sum, 0) + Object.values(ordenaMap).reduce((s, v) => s + v.sum, 0);
+        return {
+          groupId: gf.id,
+          subjects,
+          commonCounterparts: gf.commonCounterparts,
+          pairwiseCommon: (gf as any).pairwiseCommon || [],
+          totalIntergroupVolume: totalVol,
+          detectedLoopsCount: subjects.length > 2 ? 1 : 0,
+          receives: Object.values(recibeMap).sort((a, b) => b.sum - a.sum),
+          sends: Object.values(ordenaMap).sort((a, b) => b.sum - a.sum),
+          internals: Object.values(internasMap).sort((a, b) => b.sum - a.sum),
+          graphNodes: gNodes,
+          graphEdges: gEdges,
+        };
+      }),
     });
   }, [analysisMonth, lookbackMonths, threshold, selectedPresetId, filteredTransactions, positiveCases, cuitDenominacionesMap, activeGroup, detectedGroupFlows, antiquityLimit, activeTab, forensicMode, currentCuit, selectedGroupId, analysisResult]);
 
