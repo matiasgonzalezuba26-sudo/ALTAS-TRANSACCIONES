@@ -35,7 +35,7 @@ const COUNTERPART_LIMIT = 9;
 const COUNTERPART_TOP = 4;
 const ANALYZED_LIMIT = 6;
 
-function wrapText(text: string, maxLen = 14): string[] {
+function wrapText(text: string, maxLen = 18): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let cur = "";
@@ -524,7 +524,7 @@ export default function NetworkGraph({
                 const isSubject = rn.node.type === "ANALIZADO";
                 const { fill, stroke } = getNodeColor(rn.node, isCommon);
                 const name = cuitDenominacionesMap?.[rn.id] || rn.node.label || (isSubject ? "Sujeto" : "Contraparte");
-                const lines = wrapText(name, isSubject ? 14 : 12);
+                const lines = wrapText(name, isSubject ? 18 : 15);
 
                 return (
                   <g key={rn.id} transform={`translate(${cx}, ${cy})`} className="cursor-pointer"
