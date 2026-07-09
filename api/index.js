@@ -33,8 +33,8 @@ __export(app_exports, {
   default: () => app_default
 });
 module.exports = __toCommonJS(app_exports);
-var import_express = __toESM(require("express"));
-var import_dotenv = __toESM(require("dotenv"));
+var import_express = __toESM(require("express"), 1);
+var import_dotenv = __toESM(require("dotenv"), 1);
 
 // src/lib/supabaseAdmin.ts
 var import_supabase_js = require("@supabase/supabase-js");
@@ -373,10 +373,18 @@ app.get("/api/arca-records", async (req, res) => {
     return res.json({ records: [] });
   }
   try {
-    const { data, error } = await supabaseAdmin.from("arca_records").select("cuit, umbral, fecha_alta").order("created_at", { ascending: true });
-    if (error) {
-      console.error("[supabase] Error leyendo arca_records:", error);
-      return res.status(500).json({ error: error.message });
+    const pageSize = 1e3;
+    let data = [];
+    let from = 0;
+    while (true) {
+      const { data: page, error } = await supabaseAdmin.from("arca_records").select("cuit, umbral, fecha_alta").order("created_at", { ascending: true }).range(from, from + pageSize - 1);
+      if (error) {
+        console.error("[supabase] Error leyendo arca_records:", error);
+        return res.status(500).json({ error: error.message });
+      }
+      data = data.concat(page || []);
+      if (!page || page.length < pageSize) break;
+      from += pageSize;
     }
     const formatFecha = (iso) => {
       if (!iso) return "";
@@ -399,17 +407,25 @@ app.get("/api/transactions", async (req, res) => {
     return res.json({ transactions: [] });
   }
   try {
-    const { data, error } = await supabaseAdmin.from("transactions").select("operacion, tipo, fecha, monto, cuit, cuit_contraparte, fecha_alta_cuit, denominacion_sujeto, denominacion_contraparte").is("analysis_id", null).order("created_at", { ascending: true });
-    if (error) {
-      console.error("[supabase] Error leyendo transactions:", error);
-      return res.status(500).json({ error: error.message });
+    const pageSize = 1e3;
+    let allData = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabaseAdmin.from("transactions").select("operacion, tipo, fecha, monto, cuit, cuit_contraparte, fecha_alta_cuit, denominacion_sujeto, denominacion_contraparte").is("analysis_id", null).order("created_at", { ascending: true }).range(from, from + pageSize - 1);
+      if (error) {
+        console.error("[supabase] Error leyendo transactions:", error);
+        return res.status(500).json({ error: error.message });
+      }
+      allData = allData.concat(data || []);
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
     }
     const formatFecha = (iso) => {
       if (!iso) return "";
       const [y, m, d] = iso.split("-");
       return `${d}/${m}/${y}`;
     };
-    const transactions = (data || []).map((t) => ({
+    const transactions = allData.map((t) => ({
       OPERACION: t.operacion || "TRANSFERENCIA",
       TIPO: t.tipo,
       FECHA: formatFecha(t.fecha),

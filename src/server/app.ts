@@ -424,14 +424,24 @@ app.get("/api/arca-records", async (req, res) => {
     return res.json({ records: [] });
   }
   try {
-    const { data, error } = await supabaseAdmin
-      .from("arca_records")
-      .select("cuit, umbral, fecha_alta")
-      .order("created_at", { ascending: true });
+    const pageSize = 1000;
+    let data: any[] = [];
+    let from = 0;
+    while (true) {
+      const { data: page, error } = await supabaseAdmin
+        .from("arca_records")
+        .select("cuit, umbral, fecha_alta")
+        .order("created_at", { ascending: true })
+        .range(from, from + pageSize - 1);
 
-    if (error) {
-      console.error("[supabase] Error leyendo arca_records:", error);
-      return res.status(500).json({ error: error.message });
+      if (error) {
+        console.error("[supabase] Error leyendo arca_records:", error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      data = data.concat(page || []);
+      if (!page || page.length < pageSize) break;
+      from += pageSize;
     }
 
     const formatFecha = (iso: string | null) => {
@@ -461,15 +471,29 @@ app.get("/api/transactions", async (req, res) => {
     return res.json({ transactions: [] });
   }
   try {
-    const { data, error } = await supabaseAdmin
-      .from("transactions")
-      .select("operacion, tipo, fecha, monto, cuit, cuit_contraparte, fecha_alta_cuit, denominacion_sujeto, denominacion_contraparte")
-      .is("analysis_id", null)
-      .order("created_at", { ascending: true });
+    // Leer en páginas de 1000 filas: Supabase/PostgREST aplica un límite "Max Rows"
+    // (1000 por defecto) a cualquier select() sin range/limit explícito, y lo hace
+    // en SILENCIO (sin error) — por eso con archivos grandes se veían menos filas
+    // de las que realmente había en la tabla.
+    const pageSize = 1000;
+    let allData: any[] = [];
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabaseAdmin
+        .from("transactions")
+        .select("operacion, tipo, fecha, monto, cuit, cuit_contraparte, fecha_alta_cuit, denominacion_sujeto, denominacion_contraparte")
+        .is("analysis_id", null)
+        .order("created_at", { ascending: true })
+        .range(from, from + pageSize - 1);
 
-    if (error) {
-      console.error("[supabase] Error leyendo transactions:", error);
-      return res.status(500).json({ error: error.message });
+      if (error) {
+        console.error("[supabase] Error leyendo transactions:", error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      allData = allData.concat(data || []);
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
     }
 
     const formatFecha = (iso: string | null) => {
@@ -478,7 +502,7 @@ app.get("/api/transactions", async (req, res) => {
       return `${d}/${m}/${y}`;
     };
 
-    const transactions = (data || []).map((t: any) => ({
+    const transactions = allData.map((t: any) => ({
       OPERACION: t.operacion || "TRANSFERENCIA",
       TIPO: t.tipo,
       FECHA: formatFecha(t.fecha),
