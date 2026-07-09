@@ -781,7 +781,8 @@ export default function App() {
           }
 
           // UMBRAL: usar parseMonto para tolerar formatos argentinos
-          const umbralRaw = String(row[2] || "").trim();
+          // Nota: usar ?? (no ||) para que 0 no se confunda con vacío/null (0 = sin umbral / excluido, es un valor válido)
+          const umbralRaw = String(row[2] ?? "").trim();
           const { amount: umbralVal, invalid: umbralInvalid } = parseMonto(umbralRaw);
           if (umbralInvalid || umbralRaw === "") {
             arcaWarnings.push({ fila: rowIdx + 1, cuit: cuitVal, campo: "UMBRAL", detalle: `"${umbralRaw || "(vacío)"}" no es un monto válido — se registra como $0` });
