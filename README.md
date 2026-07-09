@@ -2,7 +2,12 @@
 
 **Sistema de Detección de Operaciones Inusuales con IA**
 Trabajo Final Integrador — Diplomatura en IA Aplicada a Entornos Digitales de Gestión
+
 FCE-UBA · Cohorte 2026 · Área: Prevención de Lavado de Dinero
+
+Profesor: Diego Parras
+
+Alumno: Matías González
 
 🔗 **App desplegada:** https://altas-transacciones.vercel.app/
 
